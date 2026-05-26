@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confronto 3 Linee vs RAPTOR</title>
+<style>
+:root{
+  --bg:#ffffff;--ink:#111;--dim:#666;--rule:#e5e5e5;
+  --3l:#7c3aed;--rp:#991b1b;
+  --green:#16a34a;--red:#dc2626;--gold:#b45309;
+  --M:#0ea5e9;--O:#8b5cf6;--A:#dc2626;
+  --card:#f9f9f9;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+header{padding:24px 32px 20px;border-bottom:2px solid var(--ink);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+header h1{font-size:22px;font-weight:600;letter-spacing:-.3px}
+.ts{font-size:11px;color:var(--dim);font-family:monospace}
+main{max-width:1200px;margin:0 auto;padding:24px 32px 64px}
+
+/* SECTION */
+.sec-label{font-family:monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);padding:28px 0 14px;border-top:1px solid var(--rule);margin-top:8px}
+.sec-label:first-of-type{border-top:none;padding-top:0}
+
+/* KPI ROW */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:8px}
+.kpi-card{padding:18px 20px;border:1.5px solid var(--rule);border-radius:4px}
+.kpi-card .kc-sys{font-family:monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;font-weight:600}
+.kpi-card .kc-sys.tl{color:var(--3l)} .kpi-card .kc-sys.rp{color:var(--rp)}
+.kpi-card .kc-label{font-size:11px;color:var(--dim);margin-bottom:4px}
+.kpi-card .kc-val{font-size:22px;font-weight:700;font-family:monospace}
+.kpi-card .kc-val.pos{color:var(--green)} .kpi-card .kc-val.neg{color:var(--red)}
+.kpi-card .kc-sub{font-size:11px;color:var(--dim);font-family:monospace;margin-top:4px}
+
+/* HEAD-TO-HEAD TABLE */
+.h2h-table{width:100%;border-collapse:collapse;font-size:13px}
+.h2h-table th{padding:10px 16px;text-align:left;font-family:monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border-bottom:2px solid var(--ink)}
+.h2h-table th.tl{color:var(--3l)} .h2h-table th.rp{color:var(--rp)}
+.h2h-table td{padding:11px 16px;border-bottom:1px solid var(--rule);vertical-align:middle}
+.h2h-table tr:hover td{background:#fafafa}
+.h2h-table td:first-child{font-family:monospace;font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+.win{font-weight:700;color:var(--green)}
+.chip{display:inline-block;padding:2px 8px;border-radius:2px;font-family:monospace;font-size:10px;font-weight:600;color:#fff}
+.chip.tl{background:var(--3l)} .chip.rp{background:var(--rp)} .chip.pari{background:var(--dim)}
+
+/* COMPOSIZIONE CORRENTE */
+.comp-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.comp-card{border:1.5px solid var(--rule);padding:20px;border-radius:4px}
+.comp-card h3{font-family:monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px;font-weight:600}
+.comp-card h3.tl{color:var(--3l)} .comp-card h3.rp{color:var(--rp)}
+.comp-item{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--rule)}
+.comp-item:last-child{border:none}
+.comp-bar{height:6px;border-radius:3px;background:var(--rule);flex:1;overflow:hidden}
+.comp-bar-fill{height:100%;border-radius:3px}
+.comp-bar-fill.M{background:var(--M)} .comp-bar-fill.O{background:var(--O)} .comp-bar-fill.A{background:var(--A)}
+.comp-bar-fill.eq{background:var(--green)} .comp-bar-fill.bond{background:var(--O)} .comp-bar-fill.cash{background:var(--M)} .comp-bar-fill.other{background:var(--dim)}
+.comp-name{font-size:12px;min-width:140px}
+.comp-pct{font-family:monospace;font-size:12px;font-weight:600;min-width:36px;text-align:right}
+
+/* REGIME STRIP */
+.regime-strip{display:flex;align-items:center;gap:16px;padding:16px 20px;border:1.5px solid var(--rule);border-radius:4px;margin-bottom:20px}
+.rs-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.rs-dot.tl{background:var(--3l)} .rs-dot.rp{background:var(--rp)}
+.rs-sys{font-family:monospace;font-size:11px;font-weight:600;text-transform:uppercase;min-width:80px}
+.rs-regime{font-size:14px;font-weight:600;text-transform:capitalize}
+.rs-conf{font-size:11px;color:var(--dim);font-family:monospace;margin-left:auto}
+
+/* LOADING/ERR */
+.loading{padding:48px;text-align:center;color:var(--dim);font-family:monospace;animation:pulse 1.5s infinite}
+.err{padding:32px;text-align:center;color:var(--red);font-family:monospace}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+@media(max-width:900px){
+  header,main{padding-left:16px;padding-right:16px}
+  .kpi-grid{grid-template-columns:1fr 1fr}
+  .comp-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Confronto <span style="color:var(--3l)">3 Linee</span> vs <span style="color:var(--rp)">RAPTOR</span></h1>
+  <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+    <span class="ts" id="ts-3l">3L: —</span>
+    <span class="ts" id="ts-rp">RAPTOR: —</span>
+  </div>
+</header>
+
+<main>
+  <div id="loading" class="loading">Caricamento dati...</div>
+  <div id="content" style="display:none">
+
+    <div class="sec-label">Regime corrente</div>
+    <div id="regime-strips"></div>
+
+    <div class="sec-label">KPI principali</div>
+    <div class="kpi-grid" id="kpi-grid"></div>
+
+    <div class="sec-label">Head-to-head</div>
+    <table class="h2h-table">
+      <thead>
+        <tr>
+          <th>Dimensione</th>
+          <th class="tl">3 LINEE</th>
+          <th class="rp">RAPTOR</th>
+          <th>Vantaggio</th>
+        </tr>
+      </thead>
+      <tbody id="h2h-body"></tbody>
+    </table>
+
+    <div class="sec-label">Composizione corrente</div>
+    <div class="comp-grid" id="comp-grid"></div>
+
+  </div>
+  <div id="err" class="err" style="display:none"></div>
+</main>
+
+<script>
+const URL_3L = 'https://giorgiogoldoni.github.io/FACTOR/data/compass_3linee.json';
+const URL_RP = 'https://giorgiogoldoni.github.io/portafoglio/data/portfolio.json';
+
+const fmt  = (n,suf='%') => n==null?'—':(n>=0?'+':'')+n.toFixed(1)+suf;
+const fmt0 = (n,suf='%') => n==null?'—':(n>=0?'+':'')+n.toFixed(0)+suf;
+const fmtC = n => n==null?'—':Math.round(n).toLocaleString('it')+'€';
+const cap1 = s => s?s.charAt(0).toUpperCase()+s.slice(1):'—';
+
+function winChip(winner) {
+  if (!winner) return '<span class="chip pari">PARI</span>';
+  if (winner==='3L') return '<span class="chip tl">3 LINEE</span>';
+  return '<span class="chip rp">RAPTOR</span>';
+}
+
+function winClass(v3l, vrp, higherBetter=true) {
+  if (v3l==null||vrp==null) return {t:'',r:''};
+  const better3l = higherBetter ? v3l>vrp : v3l<vrp;
+  return better3l ? {t:'win',r:''} : {t:'',r:'win'};
+}
+
+async function load() {
+  try {
+    const [r3l, rrp] = await Promise.all([
+      fetch(URL_3L+'?t='+Date.now()),
+      fetch(URL_RP+'?t='+Date.now()),
+    ]);
+    if (!r3l.ok) throw new Error('3 Linee: '+r3l.status);
+    if (!rrp.ok) throw new Error('RAPTOR: '+rrp.status);
+    const [d3l, drp] = await Promise.all([r3l.json(), rrp.json()]);
+    render(d3l, drp);
+  } catch(e) {
+    document.getElementById('loading').style.display='none';
+    const err = document.getElementById('err');
+    err.style.display='block';
+    err.textContent='Errore: '+e.message;
+  }
+}
+
+function render(d3l, drp) {
+  document.getElementById('loading').style.display='none';
+  document.getElementById('content').style.display='block';
+
+  // Timestamps
+  if (d3l.generated) document.getElementById('ts-3l').textContent =
+    '3L: '+new Date(d3l.generated).toLocaleString('it');
+  const rpHistory = drp.history || [];
+  if (rpHistory.length) document.getElementById('ts-rp').textContent =
+    'RAPTOR: '+rpHistory[0].date;
+
+  const ptf3l = d3l.portafogli_3linee || {};
+  const reg3l = d3l.regime_oggi || {};
+  const rpLatest = rpHistory[0] || {};
+  const rpPtf    = rpLatest.portfolio || [];
+
+  // ── Regime strips ────────────────────────────────────────────────
+  const rs = document.getElementById('regime-strips');
+  rs.innerHTML = `
+    <div class="regime-strip">
+      <span class="rs-dot tl"></span>
+      <span class="rs-sys">3 LINEE</span>
+      <span class="rs-regime">${cap1(reg3l.scenario)}</span>
+      <span class="rs-conf">confidence ${reg3l.confidence||'—'}%</span>
+    </div>
+    <div class="regime-strip" style="margin-top:8px">
+      <span class="rs-dot rp"></span>
+      <span class="rs-sys">RAPTOR</span>
+      <span class="rs-regime">${cap1(rpLatest.regime)}</span>
+      <span class="rs-conf">${Object.entries(rpLatest.regime_probs||{}).map(([k,v])=>k+' '+v+'%').join(' · ')}</span>
+    </div>`;
+
+  // ── Estrai metriche 3 Linee ──────────────────────────────────────
+  const mA = ptf3l.A || {}; const mO = ptf3l.O || {}; const mM = ptf3l.M || {};
+  // Performance totale 3 Linee = media pesata delle 3 linee (pesi uguali per ora)
+  const perfs3l = [mA.performance_totale_pct, mO.performance_totale_pct, mM.performance_totale_pct].filter(v=>v!=null);
+  const perf3l  = perfs3l.length ? perfs3l.reduce((a,b)=>a+b,0)/perfs3l.length : null;
+  const mdd3l   = Math.min(...[mA.max_drawdown, mO.max_drawdown, mM.max_drawdown].filter(v=>v!=null));
+  const sh3l    = mA.sharpe; // Sharpe della linea A come proxy crescita
+  const cap3l   = [mA.capitale_attuale||100000, mO.capitale_attuale||100000, mM.capitale_attuale||100000]
+                    .reduce((a,b)=>a+b,0);
+
+  // ── Estrai metriche RAPTOR (da history, calcolato dai rendimenti storici) ──
+  // RAPTOR non ha backtest: usiamo i rendimenti 4W come stima del trend recente
+  const rpWts = rpPtf.reduce((acc,e)=>{acc[e.ticker]=e.weight;return acc},{});
+  const rpRet4w = rpPtf.reduce((s,e)=>{
+    const w = (e.weight||0)/100;
+    const r = e.ret_4w||0;
+    return s + w*r;
+  },0);
+  const rpRet12w = rpPtf.reduce((s,e)=>{
+    const w = (e.weight||0)/100;
+    const r = e.ret_12w||0;
+    return s + w*r;
+  },0);
+  const rpNPos = rpPtf.length;
+  const rpMaxW = rpPtf.length ? Math.max(...rpPtf.map(e=>e.weight||0)) : null;
+
+  // ── KPI grid ────────────────────────────────────────────────────
+  const kg = document.getElementById('kpi-grid');
+  const kpis = [
+    {sys:'3L',label:'Rendimento Linea A',val:mA.performance_totale_pct,fmt:'pct',sub:'da gen 2025'},
+    {sys:'3L',label:'Rendimento Linea O',val:mO.performance_totale_pct,fmt:'pct',sub:'cedola '+((mO.cedola_aggregata_pct||0).toFixed(1))+'%'},
+    {sys:'3L',label:'Capitale totale',val:cap3l,fmt:'eur',sub:'M+O+A'},
+    {sys:'3L',label:'MDD Linea A',val:mA.max_drawdown,fmt:'pct',sub:'max drawdown storico'},
+    {sys:'RP',label:'Rendimento 4W',val:rpRet4w,fmt:'pct',sub:'portafoglio corrente'},
+    {sys:'RP',label:'Rendimento 12W',val:rpRet12w,fmt:'pct',sub:'portafoglio corrente'},
+    {sys:'RP',label:'Posizioni attive',val:rpNPos,fmt:'num',sub:'ETF correnti'},
+    {sys:'RP',label:'Peso max',val:rpMaxW,fmt:'pct0',sub:'concentrazione'},
+  ];
+  kpis.forEach(k => {
+    const v = k.val;
+    const vStr = k.fmt==='eur' ? fmtC(v)
+               : k.fmt==='num' ? (v||'—')
+               : k.fmt==='pct0' ? fmt0(v)
+               : fmt(v);
+    const cls = v==null?'':(v>=0?'pos':'neg');
+    kg.innerHTML += `
+      <div class="kpi-card">
+        <div class="kc-sys ${k.sys==='3L'?'tl':'rp'}">${k.sys==='3L'?'3 LINEE':'RAPTOR'}</div>
+        <div class="kc-label">${k.label}</div>
+        <div class="kc-val ${cls}">${vStr}</div>
+        <div class="kc-sub">${k.sub}</div>
+      </div>`;
+  });
+
+  // ── Head-to-head ─────────────────────────────────────────────────
+  const rows = [
+    {dim:'Backtest verificabile',v3l:'Dal 2025',vrp:'Da apr 2026',winner:'3L',note3l:'',noterp:'Storico breve'},
+    {dim:'Rendimento Linea A',v3l:fmt(mA.performance_totale_pct),vrp:'N/D backtest',winner:'3L',higherBetter:true},
+    {dim:'Cedola garantita',v3l:fmt(mO.cedola_aggregata_pct)+' ✅',vrp:'No',winner:'3L'},
+    {dim:'Protezione crisi',v3l:'M statica + floor O',vrp:'XEON fino 70%',winner:'RP'},
+    {dim:'Copertura asset class',v3l:'M+O+A separati',vrp:'25 ETF multi-asset',winner:'RP'},
+    {dim:'Reattività regime',v3l:'conf 65%+3sett',vrp:'Quasi giornaliero',winner:'RP'},
+    {dim:'Costi operativi',v3l:'Bassi — sett.',vrp:'Alti — giornalieri',winner:'3L'},
+    {dim:'MDD Linea A',v3l:fmt(mA.max_drawdown),vrp:'N/D',winner:null},
+    {dim:'Sharpe Linea A',v3l:mA.sharpe!=null?mA.sharpe.toFixed(2):'—',vrp:'N/D',winner:null},
+    {dim:'Rendimento 4W (attuale)',v3l:fmt(mA.performance_totale_pct!=null?null:null),vrp:fmt(rpRet4w),winner:null,note3l:'backtest dal 2025',noterp:'portafoglio corrente'},
+    {dim:'Posizioni',v3l:'3 portafogli separati',vrp:rpNPos+' ETF',winner:null},
+    {dim:'Dipendenza modello',v3l:'Regime da 15 proxy',vrp:'14 scenari hardcoded',winner:'3L'},
+    {dim:'Comunicabilità',v3l:'M/O/A chiaro',vrp:'Narrativa macro',winner:'PARI'},
+  ];
+
+  const hb = document.getElementById('h2h-body');
+  rows.forEach(r => {
+    const chip = r.winner==='PARI' ? winChip(null) : winChip(r.winner==='3L'?'3L':'RP');
+    hb.innerHTML += `<tr>
+      <td>${r.dim}</td>
+      <td class="${r.winner==='3L'?'win':''}">${r.v3l||'—'}${r.note3l?'<br><span style="font-size:10px;color:var(--dim)">'+r.note3l+'</span>':''}</td>
+      <td class="${r.winner==='RP'?'win':''}">${r.vrp||'—'}${r.noterp?'<br><span style="font-size:10px;color:var(--dim)">'+r.noterp+'</span>':''}</td>
+      <td>${chip}</td>
+    </tr>`;
+  });
+
+  // ── Composizione corrente ────────────────────────────────────────
+  const cg = document.getElementById('comp-grid');
+
+  // 3 Linee — composizione linea A corrente
+  const f2 = d3l.fase2 || {};
+  const alloc = f2.allocazione_target || {M:5,O:40,A:55};
+  const compA = (((ptf3l.A||{}).storia||[]).find(v=>!v.data_chiusura)||{}).composizione || [];
+
+  let html3l = `<div class="comp-card">
+    <h3 class="tl">3 LINEE — Allocazione Fase 2</h3>`;
+  ['M','O','A'].forEach(lid => {
+    const pct = alloc[lid]||0;
+    html3l += `<div class="comp-item">
+      <span class="comp-name" style="font-weight:600;color:var(--${lid})">${lid} — ${{M:'Monetario',O:'Obbligazionario',A:'Azionario'}[lid]}</span>
+      <div class="comp-bar"><div class="comp-bar-fill ${lid}" style="width:${pct}%"></div></div>
+      <span class="comp-pct">${pct}%</span>
+    </div>`;
+  });
+  if (compA.length) {
+    html3l += `<div style="margin-top:14px;font-family:monospace;font-size:10px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Linea A — composizione</div>`;
+    compA.forEach(e => {
+      html3l += `<div class="comp-item">
+        <span class="comp-name">${e.ticker}</span>
+        <div class="comp-bar"><div class="comp-bar-fill eq" style="width:${e.peso}%"></div></div>
+        <span class="comp-pct">${e.peso}%</span>
+      </div>`;
+    });
+  }
+  html3l += '</div>';
+
+  // RAPTOR — composizione corrente
+  const catColors = {EQUITY:'eq',EQUITY_ASIA:'eq',EQUITY_EM:'eq',EFF_CORE:'eq',
+                     BOND_HY:'bond',BOND_IG:'bond',BOND_EM:'bond',GOLD:'other',ENERGY:'other',CASH:'cash'};
+  let htmlrp = `<div class="comp-card">
+    <h3 class="rp">RAPTOR — Portafoglio corrente (${rpLatest.date||'—'})</h3>`;
+  rpPtf.sort((a,b)=>(b.weight||0)-(a.weight||0)).forEach(e => {
+    const cls = catColors[e.cat]||'other';
+    htmlrp += `<div class="comp-item">
+      <span class="comp-name">${e.ticker} <span style="font-size:10px;color:var(--dim)">${e.name||''}</span></span>
+      <div class="comp-bar"><div class="comp-bar-fill ${cls}" style="width:${e.weight}%"></div></div>
+      <span class="comp-pct">${e.weight}%</span>
+    </div>`;
+  });
+  htmlrp += '</div>';
+
+  cg.innerHTML = html3l + htmlrp;
+}
+
+load();
+</script>
+</body>
+</html>
