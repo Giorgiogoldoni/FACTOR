@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grafico ETF</title>
+<style>
+:root{
+  --bg:#ffffff;--ink:#111;--dim:#666;--rule:#e5e5e5;
+  --buy1:#22c55e;--buy2:#16a34a;--buy3:#15803d;
+  --sell:#dc2626;--watch:#f59e0b;--ranging:#6b7280;
+  --kama:#f97316;--sar-bull:#22c55e;--sar-bear:#dc2626;
+  --ao-pos:#22c55e;--ao-neg:#dc2626;
+  --rsi-line:#eab308;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:13px}
+
+/* HEADER */
+.top-bar{padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.back-btn{font-size:11px;color:var(--dim);text-decoration:none;font-family:monospace;padding:4px 8px;border:1px solid var(--rule);border-radius:3px}
+.ticker-title{font-size:18px;font-weight:700;font-family:monospace;flex:1}
+.tv-btn{font-size:11px;background:#1a75ff;color:#fff;border:none;padding:5px 12px;border-radius:3px;cursor:pointer;text-decoration:none;font-family:monospace}
+
+/* SIGNAL BADGE */
+.sig-badge{padding:3px 12px;border-radius:2px;font-family:monospace;font-size:11px;font-weight:700;color:#fff}
+.sig-badge.BUY1{background:var(--buy1)}
+.sig-badge.BUY2{background:var(--buy2)}
+.sig-badge.BUY3{background:var(--buy3)}
+.sig-badge.SELL{background:var(--sell)}
+.sig-badge.WATCH{background:var(--watch)}
+.sig-badge.RANGING{background:var(--ranging)}
+
+/* KPI GRID */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:1px;background:var(--rule);border-bottom:1px solid var(--rule)}
+.kpi{background:var(--bg);padding:8px 12px}
+.kpi .k{font-size:9px;font-family:monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:3px}
+.kpi .v{font-size:14px;font-weight:600;font-family:monospace}
+.kpi .v.pos{color:#16a34a}.kpi .v.neg{color:#dc2626}
+.kpi .v.green{color:#16a34a}.kpi .v.red{color:#dc2626}.kpi .v.orange{color:#f97316}
+
+/* REGIME */
+.regime-bar{padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.regime-badge{padding:4px 12px;border-radius:2px;font-family:monospace;font-size:11px;font-weight:600}
+.regime-label{font-size:11px;color:var(--dim)}
+.regime-metrics{display:flex;gap:16px;margin-left:auto;flex-wrap:wrap}
+.rm{font-size:11px;font-family:monospace;color:var(--dim)}
+.rm span{color:var(--ink);font-weight:600}
+
+/* CANVAS AREA */
+.chart-area{padding:8px 16px 0}
+.chart-label{font-size:9px;font-family:monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+canvas{display:block;width:100%;cursor:crosshair}
+.chart-sep{height:1px;background:var(--rule);margin:6px 0}
+
+/* STORIA SEGNALI */
+.storia-section{padding:12px 16px;border-top:1px solid var(--rule)}
+.storia-title{font-family:monospace;font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.storia-table{width:100%;border-collapse:collapse;font-size:12px}
+.storia-table th{padding:6px 10px;text-align:left;font-family:monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border-bottom:1.5px solid var(--ink)}
+.storia-table td{padding:7px 10px;border-bottom:1px solid var(--rule)}
+
+/* TOOLTIP */
+.tooltip{position:fixed;background:rgba(0,0,0,.85);color:#fff;padding:8px 12px;border-radius:4px;font-family:monospace;font-size:11px;line-height:1.7;pointer-events:none;display:none;z-index:999;white-space:nowrap}
+
+/* LOADING */
+.loading{display:flex;align-items:center;justify-content:center;height:300px;font-family:monospace;color:var(--dim);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.err{padding:32px;text-align:center;color:#dc2626;font-family:monospace}
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">Caricamento dati...</div>
+<div id="app" style="display:none">
+  <div class="top-bar">
+    <a href="javascript:history.back()" class="back-btn">← Torna</a>
+    <span class="ticker-title" id="ticker-title">—</span>
+    <span class="sig-badge" id="sig-badge">—</span>
+    <a id="tv-btn" href="#" target="_blank" class="tv-btn">📈 TradingView</a>
+  </div>
+
+  <div class="kpi-grid" id="kpi-grid"></div>
+
+  <div class="regime-bar" id="regime-bar"></div>
+
+  <div class="chart-area">
+    <div class="chart-label">Prezzo · KAMA · Segnali BUY/SELL · SAR</div>
+    <canvas id="c-price" height="260"></canvas>
+    <div class="chart-sep"></div>
+    <div class="chart-label">BAFF (barre consecutive sopra/sotto KAMA)</div>
+    <canvas id="c-baff" height="80"></canvas>
+    <div class="chart-sep"></div>
+    <div class="chart-label">AO (Awesome Oscillator)</div>
+    <canvas id="c-ao" height="80"></canvas>
+    <div class="chart-sep"></div>
+    <div class="chart-label">RSI (14)</div>
+    <canvas id="c-rsi" height="80"></canvas>
+  </div>
+
+  <div class="storia-section">
+    <div class="storia-title">Storia segnali</div>
+    <table class="storia-table">
+      <thead><tr><th>Data</th><th>Segnale</th><th>Prezzo</th></tr></thead>
+      <tbody id="storia-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="err" class="err" style="display:none"></div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ── PARAMETRI ──────────────────────────────────────────────────────────
+const params  = new URLSearchParams(location.search);
+const TICKER  = params.get('ticker') || 'XSMI.MI';
+const BASE_URL = 'https://giorgiogoldoni.github.io/FACTOR/data/charts/';
+
+function jsonUrl(ticker) {
+  return BASE_URL + ticker.replace(/\./g,'_') + '.json?t=' + Date.now();
+}
+
+// TradingView suffix map
+function tvUrl(ticker) {
+  const m = {'.MI':'MIL:','.DE':'XETR:','.PA':'EURONEXT:','.L':'LSE:'};
+  for (const [suf, pre] of Object.entries(m)) {
+    if (ticker.endsWith(suf)) return 'https://www.tradingview.com/chart/?symbol=' + pre + ticker.replace(suf,'');
+  }
+  return 'https://www.tradingview.com/chart/?symbol=' + ticker;
+}
+
+// ── COLORI SEGNALE ──────────────────────────────────────────────────────
+const SIG_COLORS = {
+  BUY1:'#22c55e', BUY2:'#16a34a', BUY3:'#15803d',
+  SELL:'#dc2626', WATCH:'#f59e0b', RANGING:'#9ca3af'
+};
+
+// ── CARICA DATI ─────────────────────────────────────────────────────────
+async function load() {
+  try {
+    const r = await fetch(jsonUrl(TICKER));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    render(d);
+  } catch(e) {
+    document.getElementById('loading').style.display='none';
+    const err = document.getElementById('err');
+    err.style.display='block';
+    err.innerHTML = `Grafico non disponibile per <b>${TICKER}</b><br>
+      <span style="font-size:12px;color:#666">Il JSON verrà generato al prossimo run del workflow FACTOR.<br>
+      Nel frattempo: <a href="${tvUrl(TICKER)}" target="_blank" style="color:#1a75ff">Apri su TradingView</a></span>`;
+  }
+}
+
+function render(d) {
+  document.getElementById('loading').style.display='none';
+  document.getElementById('app').style.display='block';
+
+  const sig = d.signal || 'RANGING';
+  document.title = `${d.ticker} — ${d.nome || ''}`;
+
+  // TOP BAR
+  document.getElementById('ticker-title').textContent = `${d.ticker} — ${d.nome || ''}`;
+  const sb = document.getElementById('sig-badge');
+  sb.textContent = sig; sb.className = 'sig-badge ' + sig;
+  document.getElementById('tv-btn').href = tvUrl(d.ticker);
+
+  // KPI
+  const kpis = [
+    {k:'Rating',   v: d.rating || '—',         cls: d.rating?.includes('BUY')?'green':d.rating==='SELL'?'red':''},
+    {k:'Prezzo',   v: d.price?.toFixed(4) || '—', cls:''},
+    {k:'Var% oggi',v: d.chg_pct != null ? (d.chg_pct>=0?'+':'')+d.chg_pct.toFixed(2)+'%' : '—',
+                   cls: d.chg_pct >= 0 ? 'pos' : 'neg'},
+    {k:'Score',    v: (d.score||0)+'/100',       cls: d.score>=60?'green':d.score>=45?'orange':'red'},
+    {k:'ER',       v: d.er?.toFixed(4) || '—',   cls:''},
+    {k:'KAMA',     v: d.kama?.toFixed(4) || '—', cls: d.kama && d.price > d.kama ? 'green':'red'},
+    {k:'KAMA%',    v: d.k_pct != null ? (d.k_pct>=0?'+':'')+d.k_pct.toFixed(2)+'%' : '—',
+                   cls: d.k_pct>=0?'green':'red'},
+    {k:'BAFF',     v: d.baff != null ? (d.baff>=0?'+':'')+d.baff : '—',
+                   cls: d.baff > 0 ? 'green' : d.baff < 0 ? 'red' : ''},
+    {k:'SAR',      v: d.sar_bull ? '▲ BULL' : '▼ BEAR', cls: d.sar_bull?'green':'red'},
+    {k:'AO',       v: d.ao?.toFixed(4) || '—',  cls: d.ao > 0 ? 'green':'red'},
+    {k:'RSI',      v: d.rsi?.toFixed(1) || '—', cls:''},
+    {k:'ADX',      v: d.adx?.toFixed(1) || '—', cls:''},
+    {k:'Mom 1M',   v: d.mom1m != null ? (d.mom1m>=0?'+':'')+d.mom1m.toFixed(2)+'%' : '—',
+                   cls: d.mom1m>=0?'green':'red'},
+    {k:'Mom 3M',   v: d.mom3m != null ? (d.mom3m>=0?'+':'')+d.mom3m.toFixed(2)+'%' : '—',
+                   cls: d.mom3m>=0?'green':'red'},
+    {k:'Mom 6M',   v: d.mom6m != null ? (d.mom6m>=0?'+':'')+d.mom6m.toFixed(2)+'%' : '—',
+                   cls: d.mom6m>=0?'green':'red'},
+    {k:'Segnale dal', v: d.signal_date || '—', cls:''},
+    {k:'Barre',    v: d.signal_bars || '—',    cls:''},
+    {k:'Trend KAMA',v: d.kama_trend || '—',
+                   cls: d.kama_trend==='VERDE'?'green':d.kama_trend==='ROSSO'?'red':''},
+  ];
+  const kg = document.getElementById('kpi-grid');
+  kpis.forEach(k => {
+    kg.innerHTML += `<div class="kpi"><div class="k">${k.k}</div><div class="v ${k.cls}">${k.v}</div></div>`;
+  });
+
+  // REGIME
+  renderRegime(d);
+
+  // GRAFICI
+  const dates   = d.dates   || [];
+  const closes  = d.closes  || [];
+  const kamas   = d.kama_series || [];
+  const sars    = d.sar_series  || [];
+  const sarBull = d.sar_bull_series || [];
+  const aos     = d.ao_series   || [];
+  const rsis    = d.rsi_series  || [];
+  const baffs   = d.baff_series || [];
+  const signals = d.signals     || [];
+
+  drawPrice(dates, closes, kamas, sars, sarBull, signals);
+  drawBaff(dates, baffs);
+  drawAO(dates, aos);
+  drawRSI(dates, rsis);
+  setupTooltips(dates, closes, kamas, sars, aos, rsis, baffs, signals);
+
+  // STORIA SEGNALI
+  const sb2 = document.getElementById('storia-body');
+  (d.storia_segnali || []).forEach(s => {
+    const cls = SIG_COLORS[s.segnale] || '#666';
+    sb2.innerHTML += `<tr>
+      <td style="font-family:monospace">${s.data}</td>
+      <td><span class="sig-badge ${s.segnale}" style="font-size:10px">${s.segnale}</span></td>
+      <td style="font-family:monospace">${s.prezzo}</td>
+    </tr>`;
+  });
+}
+
+function renderRegime(d) {
+  const rb = document.getElementById('regime-bar');
+  const regime = d.regime || {};
+  const label  = regime.label || '—';
+  const color  = regime.color || '#666';
+  const h60    = d.hurst_60 || '—';
+  const h1y    = d.hurst_1y || '—';
+  const adx    = d.adx || '—';
+
+  // Carattere annuale da hurst_1y
+  let caratt = 'Neutro';
+  if (d.hurst_1y) {
+    caratt = d.hurst_1y > 0.55 ? 'Trending' : d.hurst_1y < 0.45 ? 'Mean reverting' : 'Random walk';
+  }
+
+  // Forza ADX
+  let forzaAdx = 'Debole';
+  if (d.adx) {
+    forzaAdx = d.adx >= 25 ? (d.adx >= 35 ? 'Forte' : 'Media') : 'Debole';
+  }
+
+  rb.innerHTML = `
+    <span class="regime-badge" style="background:${color}20;color:${color};border:1px solid ${color}">${label}</span>
+    <div class="regime-metrics">
+      <div class="rm">Hurst 60g <span>${typeof h60==='number'?h60.toFixed(3):h60}</span></div>
+      <div class="rm">Carattere annuale <span>${caratt}</span></div>
+      <div class="rm">ADX forza <span>${forzaAdx}</span></div>
+    </div>`;
+}
+
+// ── DRAWING UTILITIES ────────────────────────────────────────────────────
+function initCanvas(id) {
+  const canvas = document.getElementById(id);
+  const W = canvas.parentElement.clientWidth - 32;
+  canvas.width  = W;
+  canvas.style.width  = W + 'px';
+  return {canvas, ctx: canvas.getContext('2d'), W, H: canvas.height};
+}
+
+function scaleY(val, min, max, H, padT=10, padB=10) {
+  if (max === min) return H/2;
+  return padT + (1 - (val - min)/(max - min)) * (H - padT - padB);
+}
+
+function xPos(i, n, W, padL=50, padR=10) {
+  return padL + i/(n-1) * (W - padL - padR);
+}
+
+// ── GRAFICO PREZZI ───────────────────────────────────────────────────────
+function drawPrice(dates, closes, kamas, sars, sarBull, signals) {
+  const {canvas, ctx, W, H} = initCanvas('c-price');
+  if (!closes.length) return;
+
+  const n   = closes.length;
+  const PAD = {l:55, r:12, t:12, b:28};
+  const cw  = W - PAD.l - PAD.r;
+  const ch  = H - PAD.t - PAD.b;
+
+  const allVals = [...closes, ...kamas.filter(v=>v!=null), ...sars.filter(v=>v!=null)];
+  const minV = Math.min(...allVals) * 0.998;
+  const maxV = Math.max(...allVals) * 1.002;
+
+  const sx = i => PAD.l + i/(n-1)*cw;
+  const sy = v => PAD.t + (1-(v-minV)/(maxV-minV))*ch;
+
+  // Sfondo
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  // Griglia
+  ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 1;
+  for (let i=0; i<=4; i++) {
+    const y = PAD.t + ch*i/4;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W-PAD.r, y); ctx.stroke();
+    const v = maxV - (maxV-minV)*i/4;
+    ctx.fillStyle = '#999'; ctx.font = '9px monospace';
+    ctx.fillText(v.toFixed(2), 2, y+3);
+  }
+
+  // Etichette asse X
+  ctx.fillStyle = '#999'; ctx.font = '9px monospace';
+  const step = Math.max(1, Math.floor(n/8));
+  for (let i=0; i<n; i+=step) {
+    const x = sx(i);
+    ctx.fillText(dates[i].slice(5), x-12, H-PAD.b+12);
+  }
+
+  // Area candlestick (body colorato per segnale)
+  for (let i=0; i<n; i++) {
+    const x  = sx(i);
+    const y  = sy(closes[i]);
+    const sig = signals[i] || 'RANGING';
+    const col = SIG_COLORS[sig] || '#9ca3af';
+    ctx.fillStyle = col + '22';
+    if (i > 0) {
+      const x0 = sx(i-1);
+      const y0 = sy(closes[i-1]);
+      ctx.fillRect(Math.min(x0,x), Math.min(y0,y), Math.abs(x-x0)+1, Math.abs(y-y0)+1);
+    }
+  }
+
+  // Linea prezzo
+  ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  closes.forEach((v,i) => i===0 ? ctx.moveTo(sx(i),sy(v)) : ctx.lineTo(sx(i),sy(v)));
+  ctx.stroke();
+
+  // Linea KAMA
+  ctx.strokeStyle = '#f97316'; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+  ctx.beginPath(); let first = true;
+  kamas.forEach((v,i) => {
+    if (v==null) { first=true; return; }
+    if (first) { ctx.moveTo(sx(i),sy(v)); first=false; }
+    else ctx.lineTo(sx(i),sy(v));
+  });
+  ctx.stroke();
+
+  // SAR punti
+  sars.forEach((v,i) => {
+    if (v==null) return;
+    const isBull = sarBull[i];
+    ctx.fillStyle = isBull ? '#22c55e' : '#dc2626';
+    ctx.beginPath();
+    ctx.arc(sx(i), sy(v), 2, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // Triangoli BUY/SELL
+  for (let i=0; i<n; i++) {
+    const sig = signals[i];
+    if (!sig || sig==='RANGING' || sig==='WATCH') continue;
+    const isBuy = sig.startsWith('BUY');
+    const x = sx(i); const y = sy(closes[i]);
+    ctx.fillStyle = isBuy ? SIG_COLORS[sig] : '#dc2626';
+    ctx.beginPath();
+    if (isBuy) {
+      ctx.moveTo(x, y+12); ctx.lineTo(x-5, y+20); ctx.lineTo(x+5, y+20);
+    } else {
+      ctx.moveTo(x, y-12); ctx.lineTo(x-5, y-20); ctx.lineTo(x+5, y-20);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+// ── GRAFICO BAFF ─────────────────────────────────────────────────────────
+function drawBaff(dates, baffs) {
+  const {canvas, ctx, W, H} = initCanvas('c-baff');
+  if (!baffs.length) return;
+  const n = baffs.length;
+  const PAD = {l:55, r:12, t:8, b:8};
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const maxAbs = Math.max(1, ...baffs.map(Math.abs));
+  const barW = Math.max(1, cw/n - 1);
+  const zero = PAD.t + ch/2;
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  // Linea zero
+  ctx.strokeStyle = '#e5e5e5'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PAD.l, zero); ctx.lineTo(W-PAD.r, zero); ctx.stroke();
+
+  // Scale
+  ctx.fillStyle='#999'; ctx.font='9px monospace';
+  ctx.fillText('+'+maxAbs, 2, PAD.t+6);
+  ctx.fillText('-'+maxAbs, 2, H-PAD.b);
+
+  baffs.forEach((v,i) => {
+    const x = PAD.l + i/n*cw;
+    const h = Math.abs(v)/maxAbs * (ch/2 - 2);
+    ctx.fillStyle = v >= 0 ? '#22c55e' : '#dc2626';
+    if (v >= 0) ctx.fillRect(x, zero-h, barW, h);
+    else        ctx.fillRect(x, zero, barW, h);
+  });
+}
+
+// ── GRAFICO AO ────────────────────────────────────────────────────────────
+function drawAO(dates, aos) {
+  const {canvas, ctx, W, H} = initCanvas('c-ao');
+  const valid = aos.filter(v => v != null);
+  if (!valid.length) return;
+  const n = aos.length;
+  const PAD = {l:55, r:12, t:8, b:8};
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const maxAbs = Math.max(...valid.map(Math.abs), 0.01);
+  const barW = Math.max(1, cw/n - 1);
+  const zero = PAD.t + ch/2;
+
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#e5e5e5'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PAD.l, zero); ctx.lineTo(W-PAD.r, zero); ctx.stroke();
+
+  ctx.fillStyle='#999'; ctx.font='9px monospace';
+  ctx.fillText(maxAbs.toFixed(1), 2, PAD.t+6);
+  ctx.fillText('-'+maxAbs.toFixed(1), 2, H-PAD.b);
+
+  aos.forEach((v,i) => {
+    if (v==null) return;
+    const x = PAD.l + i/n*cw;
+    const h = Math.abs(v)/maxAbs * (ch/2 - 2);
+    const prevAo = i > 0 ? (aos[i-1] || 0) : 0;
+    // Verde se AO > precedente, rosso se < precedente
+    ctx.fillStyle = v > prevAo ? '#22c55e' : '#dc2626';
+    if (v >= 0) ctx.fillRect(x, zero-h, barW, h);
+    else        ctx.fillRect(x, zero, barW, h);
+  });
+}
+
+// ── GRAFICO RSI ────────────────────────────────────────────────────────────
+function drawRSI(dates, rsis) {
+  const {canvas, ctx, W, H} = initCanvas('c-rsi');
+  const valid = rsis.filter(v => v != null);
+  if (!valid.length) return;
+  const n = rsis.length;
+  const PAD = {l:55, r:12, t:8, b:8};
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+
+  // Zone
+  const sy = v => PAD.t + (1-v/100)*ch;
+  const sx = i => PAD.l + i/(n-1)*cw;
+
+  // Zona ipercomprato (70-100)
+  ctx.fillStyle = 'rgba(220,38,38,0.06)';
+  ctx.fillRect(PAD.l, sy(100), cw, sy(70)-sy(100));
+
+  // Zona ipervenduto (0-30)
+  ctx.fillStyle = 'rgba(34,197,94,0.06)';
+  ctx.fillRect(PAD.l, sy(30), cw, sy(0)-sy(30));
+
+  // Linee 70, 50, 30
+  [[70,'#dc262640'],[50,'#e5e5e5'],[30,'#22c55e40']].forEach(([v,c]) => {
+    ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(PAD.l, sy(v)); ctx.lineTo(W-PAD.r, sy(v)); ctx.stroke();
+    ctx.fillStyle='#999'; ctx.font='9px monospace';
+    ctx.fillText(v, 2, sy(v)+3);
+  });
+  ctx.setLineDash([]);
+
+  // Linea RSI
+  ctx.strokeStyle = '#eab308'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); let first = true;
+  rsis.forEach((v,i) => {
+    if (v==null) { first=true; return; }
+    if (first) { ctx.moveTo(sx(i), sy(v)); first=false; }
+    else ctx.lineTo(sx(i), sy(v));
+  });
+  ctx.stroke();
+
+  // Etichette
+  ctx.fillStyle='#999'; ctx.font='9px monospace';
+  ctx.fillText('100', 2, PAD.t+6);
+  ctx.fillText('0',   2, H-PAD.b);
+}
+
+// ── TOOLTIP CROSSHAIR ────────────────────────────────────────────────────
+function setupTooltips(dates, closes, kamas, sars, aos, rsis, baffs, signals) {
+  const tooltip  = document.getElementById('tooltip');
+  const canvases = ['c-price','c-baff','c-ao','c-rsi'].map(id=>document.getElementById(id));
+
+  canvases.forEach(canvas => {
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      const x    = e.clientX - rect.left;
+      const n    = closes.length;
+      const PAD  = {l:55, r:12};
+      const cw   = canvas.width - PAD.l - PAD.r;
+      const i    = Math.max(0, Math.min(n-1, Math.round((x-PAD.l)/cw*(n-1))));
+
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 14) + 'px';
+      tooltip.style.top  = (e.clientY - 40) + 'px';
+
+      const sig = signals[i] || '—';
+      const col = SIG_COLORS[sig] || '#666';
+      tooltip.innerHTML = `
+        <b>${dates[i] || '—'}</b><br>
+        Prezzo: <b>${closes[i]?.toFixed(4) || '—'}</b><br>
+        KAMA: ${kamas[i]?.toFixed(4) || '—'}<br>
+        SAR: ${sars[i]?.toFixed(4) || '—'}<br>
+        AO: ${aos[i]?.toFixed(4) || '—'}<br>
+        RSI: ${rsis[i]?.toFixed(1) || '—'}<br>
+        BAFF: ${baffs[i] != null ? (baffs[i]>=0?'+':'')+baffs[i] : '—'}<br>
+        Segnale: <span style="color:${col};font-weight:700">${sig}</span>`;
+    });
+    canvas.addEventListener('mouseleave', () => tooltip.style.display='none');
+  });
+}
+
+// Ridisegna su resize
+window.addEventListener('resize', load);
+
+load();
+</script>
+</body>
+</html>
