@@ -8,7 +8,7 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,6 +22,8 @@ jobs:
         run: python compass_factor.py
       - name: Run 3 Linee Strategy
         run: python compass_3linee.py
+      - name: Run ETP Strategy
+        run: python compass_etp.py
       - name: Commit and push
         run: |
           git config user.name "COMPASS Factor Bot"
