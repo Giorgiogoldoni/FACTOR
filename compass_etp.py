@@ -811,7 +811,7 @@ def main():
     # ── Output ────────────────────────────────────────────────────────────
     output = {
         "generated":    datetime.datetime.utcnow().isoformat(),
-        "version":      "etp_1.0",
+        "version":      "etp_1.1",
         "run_number":   run_number,
         "strategy":     "COMPASS ETP — Presente + Futuro dinamico",
         "backtest_start": BACKTEST_START,
