@@ -1109,6 +1109,304 @@ def run_factor_backtest(level_id, etf_data_completo, alloc_t,
     return versioni
 
 # ── MAIN ────────────────────────────────────────────────────────────────────
+
+# ── SALVATAGGIO CHART JSON ─────────────────────────────────────────────────────
+def calc_sar_simple(closes):
+    """SAR approssimato da soli closes (senza highs/lows)."""
+    n = len(closes)
+    sar = [None] * n
+    bull = [True] * n
+    if n < 3: return sar, bull
+    af_step = 0.02; af_max = 0.2
+    af = af_step; ep = closes[0]; is_bull = True
+    sar[0] = closes[0] * 0.99
+    for i in range(1, n):
+        prev_sar = sar[i-1]
+        if is_bull:
+            new_sar = prev_sar + af * (ep - prev_sar)
+            new_sar = min(new_sar, closes[i-1], closes[i-2] if i > 1 else closes[i-1])
+            if closes[i] < new_sar:
+                is_bull = False; af = af_step; ep = closes[i]; new_sar = ep * 1.005
+            else:
+                if closes[i] > ep: ep = closes[i]; af = min(af + af_step, af_max)
+        else:
+            new_sar = prev_sar + af * (ep - prev_sar)
+            new_sar = max(new_sar, closes[i-1], closes[i-2] if i > 1 else closes[i-1])
+            if closes[i] > new_sar:
+                is_bull = True; af = af_step; ep = closes[i]; new_sar = ep * 0.995
+            else:
+                if closes[i] < ep: ep = closes[i]; af = min(af + af_step, af_max)
+        sar[i] = round(new_sar, 4)
+        bull[i] = is_bull
+    return sar, bull
+
+def calc_baff_series(closes, kama_list):
+    """Calcola BAFF per ogni punto — conteggio barre consecutive sopra/sotto KAMA."""
+    n = len(closes)
+    baff = [0] * n
+    for i in range(1, n):
+        if kama_list[i] is None: continue
+        above = closes[i] > kama_list[i]
+        count = 0
+        for j in range(i, -1, -1):
+            if kama_list[j] is None: break
+            if above:
+                if closes[j] > kama_list[j]: count += 1
+                else: break
+            else:
+                if closes[j] <= kama_list[j]: count -= 1
+                else: break
+        baff[i] = count
+    return baff
+
+def calc_signal_series(closes, kama_list, ao_list, rsi_list, sar_bull_list,
+                       er_list, buy1=30, buy2=45, buy3=60, sell=25):
+    """Ricalcola la serie di segnali BUY1/2/3/SELL/WATCH/RANGING."""
+    n = len(closes)
+    signals = []
+    for i in range(n):
+        c = closes[i]
+        k = kama_list[i]
+        ao = ao_list[i]
+        rsi = rsi_list[i]
+        sb = sar_bull_list[i]
+        er = er_list[i] if er_list[i] is not None else 0
+
+        if k is None or ao is None or rsi is None:
+            signals.append("RANGING")
+            continue
+
+        kama_above = c > k
+        ao_rising  = ao > 0
+        score = 0
+        if kama_above: score += 20
+        if sb: score += 20
+        if ao_rising: score += 15
+        if rsi > 55: score += 15
+        elif rsi > 50: score += 8
+        if er > 0.28: score += 15
+        elif er > 0.20: score += 8
+        # Penalità RSI ipercomprato
+        if rsi > 82: score = int(score * 0.4)
+        elif rsi > 72: score = int(score * 0.7)
+
+        if not kama_above and not sb and ao < 0:
+            signals.append("SELL")
+        elif score >= buy3:
+            signals.append("BUY3")
+        elif score >= buy2:
+            signals.append("BUY2")
+        elif score >= buy1:
+            signals.append("BUY1")
+        elif score < sell and not kama_above:
+            signals.append("SELL")
+        elif kama_above and not sb:
+            signals.append("WATCH")
+        else:
+            signals.append("RANGING")
+    return signals
+
+def salva_chart_json(ticker, etf_data, out_dir):
+    """
+    Salva data/charts/TICKER_MI.json con tutti i dati per il grafico.
+    Struttura: dates, closes, kama, sar, sar_bull, ao, rsi, signals, baff
+    """
+    import math
+    sig = etf_data.get(ticker)
+    if not sig or not sig.get("closes") or not sig.get("dates"):
+        return False
+
+    closes = sig["closes"]
+    dates  = sig["dates"]
+    n = min(len(closes), len(dates))
+    closes = closes[:n]
+    dates  = dates[:n]
+
+    # Ultimi 90 giorni
+    N90 = min(90, n)
+    c90 = closes[-N90:]
+    d90 = dates[-N90:]
+
+    # KAMA (calcolo completo poi slice)
+    def calc_kama_full(cl, period=10, fast=2, slow=30):
+        fast_sc = 2/(fast+1); slow_sc = 2/(slow+1)
+        kama = [None] * len(cl)
+        if len(cl) <= period: return kama
+        kama[period] = cl[period]
+        for i in range(period+1, len(cl)):
+            direction  = abs(cl[i] - cl[i-period])
+            volatility = sum(abs(cl[j]-cl[j-1]) for j in range(i-period+1, i+1))
+            er = direction/volatility if volatility else 0
+            sc = (er*(fast_sc-slow_sc)+slow_sc)**2
+            kama[i] = kama[i-1] + sc*(cl[i]-kama[i-1])
+        return kama
+
+    def calc_ao_full(cl):
+        n = len(cl)
+        ao = [None] * n
+        for i in range(33, n):
+            s5  = sum(cl[i-4:i+1])/5
+            s34 = sum(cl[i-33:i+1])/34
+            ao[i] = round(s5 - s34, 4)
+        return ao
+
+    def calc_rsi_full(cl, period=14):
+        n = len(cl)
+        rsi = [None] * n
+        if n < period+1: return rsi
+        gains=[]; losses=[]
+        for i in range(1,n):
+            d = cl[i]-cl[i-1]
+            gains.append(max(d,0)); losses.append(max(-d,0))
+        avg_g = sum(gains[:period])/period
+        avg_l = sum(losses[:period])/period
+        for i in range(period, n-1):
+            avg_g = (avg_g*(period-1)+gains[i])/period
+            avg_l = (avg_l*(period-1)+losses[i])/period
+            rs = avg_g/avg_l if avg_l else 100
+            rsi[i+1] = round(100-100/(1+rs), 2)
+        return rsi
+
+    def calc_er_full(cl, period=10):
+        n = len(cl)
+        er = [None] * n
+        for i in range(period, n):
+            direction  = abs(cl[i]-cl[i-period])
+            volatility = sum(abs(cl[j]-cl[j-1]) for j in range(i-period+1, i+1))
+            er[i] = direction/volatility if volatility else 0
+        return er
+
+    kama_full = calc_kama_full(closes)
+    ao_full   = calc_ao_full(closes)
+    rsi_full  = calc_rsi_full(closes)
+    er_full   = calc_er_full(closes)
+    sar_full, sar_bull_full = calc_sar_simple(closes)
+
+    # Slice ultimi 90
+    kama90     = [round(v,4) if v else None for v in kama_full[-N90:]]
+    ao90       = ao_full[-N90:]
+    rsi90      = rsi_full[-N90:]
+    er90       = er_full[-N90:]
+    sar90      = sar_full[-N90:]
+    sar_bull90 = sar_bull_full[-N90:]
+
+    # BAFF serie
+    baff90 = calc_baff_series(c90, kama90)
+
+    # Segnali
+    signals90 = calc_signal_series(c90, kama90, ao90, rsi90, sar_bull90, er90)
+
+    # Storia segnali (solo cambi)
+    storia = []
+    prev_sig = None
+    for i in range(len(d90)-1, -1, -1):
+        sig_i = signals90[i]
+        if sig_i != prev_sig:
+            storia.append({"data": d90[i], "segnale": sig_i,
+                           "prezzo": round(c90[i], 4)})
+            prev_sig = sig_i
+        if len(storia) >= 15: break
+
+    # Metriche correnti
+    last_close = c90[-1]
+    last_kama  = kama90[-1]
+    last_ao    = ao90[-1]
+    last_rsi   = rsi90[-1]
+    last_sar   = sar90[-1]
+    last_sb    = sar_bull90[-1]
+    last_er    = er90[-1]
+
+    # Mom
+    def mom(cl, days):
+        if len(cl) <= days: return None
+        old = cl[-(days+1)]
+        return round((cl[-1]-old)/old*100, 2) if old else None
+
+    mom1m  = mom(c90, 21)
+    mom3m  = mom(closes, 63)
+    mom6m  = mom(closes, 126)
+    chg1d  = round((closes[-1]-closes[-2])/closes[-2]*100, 2) if len(closes)>1 else 0
+
+    # Trend KAMA
+    kama_valid = [v for v in kama90[-6:] if v]
+    if len(kama_valid) >= 5:
+        if all(kama_valid[i]<kama_valid[i+1] for i in range(len(kama_valid)-1)):
+            trend_kama = "VERDE"
+        elif all(kama_valid[i]>kama_valid[i+1] for i in range(len(kama_valid)-1)):
+            trend_kama = "ROSSO"
+        else:
+            trend_kama = "GRIGIO"
+    else:
+        trend_kama = "GRIGIO"
+
+    # Score corrente
+    score = 0
+    if last_kama and last_close > last_kama: score += 20
+    if last_sb: score += 20
+    if last_ao and last_ao > 0: score += 15
+    if last_rsi and last_rsi > 55: score += 15
+    elif last_rsi and last_rsi > 50: score += 8
+    if last_er and last_er > 0.28: score += 15
+    elif last_er and last_er > 0.20: score += 8
+    if last_rsi and last_rsi > 82: score = int(score*0.4)
+    elif last_rsi and last_rsi > 72: score = int(score*0.7)
+    score = min(100, score)
+
+    current_signal = signals90[-1]
+    if score >= 60: rating = "STRONG BUY"
+    elif score >= 45: rating = "BUY"
+    elif score >= 30: rating = "NEUTRAL"
+    else: rating = "SELL"
+
+    # BAFF corrente
+    baff_curr = baff90[-1] if baff90 else 0
+
+    # ADX approssimato
+    adx_approx = round(min(50, abs(baff_curr) * 3 + (last_er or 0) * 30), 1)
+
+    chart = {
+        "ticker":      ticker,
+        "nome":        ETF_NOMI.get(ticker, ticker),
+        "price":       round(last_close, 4),
+        "chg_pct":     chg1d,
+        "signal":      current_signal,
+        "rating":      rating,
+        "score":       score,
+        "er":          round(last_er, 4) if last_er else None,
+        "kama":        round(last_kama, 4) if last_kama else None,
+        "k_pct":       round((last_close/last_kama-1)*100, 2) if last_kama else None,
+        "kama_trend":  trend_kama,
+        "baff":        baff_curr,
+        "sar_bull":    last_sb,
+        "ao":          round(last_ao, 4) if last_ao else None,
+        "rsi":         round(last_rsi, 1) if last_rsi else None,
+        "adx":         adx_approx,
+        "mom1m":       mom1m,
+        "mom3m":       mom3m,
+        "mom6m":       mom6m,
+        "signal_date": d90[-1],
+        "signal_bars": len([s for s in reversed(signals90) if s == current_signal]),
+        # Serie per il grafico
+        "dates":       d90,
+        "closes":      [round(v,4) for v in c90],
+        "kama_series": kama90,
+        "sar_series":  sar90,
+        "sar_bull_series": sar_bull90,
+        "ao_series":   ao90,
+        "rsi_series":  rsi90,
+        "baff_series": baff90,
+        "signals":     signals90,
+        "storia_segnali": storia,
+    }
+
+    import json
+    from pathlib import Path
+    out_path = Path(out_dir) / f"{ticker.replace('.','_')}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, 'w') as f:
+        json.dump(chart, f, separators=(',',':'))
+    return True
+
 def main():
     oggi=datetime.date.today().isoformat()
     print(f"COMPASS Factor Strategy v1.0 — {oggi}")
@@ -1191,6 +1489,16 @@ def main():
         time.sleep(0.35)
 
     print(f"  Download: {success} OK, {errors} ERR")
+
+    # ── Salva chart JSON per ogni ETF ────────────────────────────────
+    print(f"\n  Salvataggio chart JSON...")
+    charts_dir = BASE_DIR / "data" / "charts"
+    n_charts = 0
+    for ticker in sorted(etf_data_completo.keys()):
+        if etf_data_completo[ticker].get("closes"):
+            if salva_chart_json(ticker, etf_data_completo, charts_dir):
+                n_charts += 1
+    print(f"  ✅ {n_charts} chart JSON salvati in {charts_dir}")
 
     # Aggiungi proxy data per regime storico
     for t, d in proxy_data.items():
