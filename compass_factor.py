@@ -1409,7 +1409,7 @@ def salva_chart_json(ticker, etf_data, out_dir):
 
 def main():
     oggi=datetime.date.today().isoformat()
-    print(f"COMPASS Factor Strategy v1.0 — {oggi}")
+    print(f"COMPASS Factor Strategy v1.1 — {oggi}")
     print(f"Livelli: {LIVELLI_FACTOR}")
     print(f"Benchmark target: {BENCHMARK_TARGET}")
 
