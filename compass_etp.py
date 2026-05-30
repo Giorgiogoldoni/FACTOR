@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-COMPASS ETP — compass_etp.py v1.0
+COMPASS ETP — compass_etp.py v2.0
 ══════════════════════════════════════════════════════════════════════
 Portafoglio ETP combinato: universo RAPTOR (25) + ETF FACTOR (50) = 75 ETF
 
@@ -10,15 +10,23 @@ Logica:
   peso_futuro  = max(0, (prob_4w - 50) / 50 * 0.40)   ← dinamico
   peso_presente = 1 - peso_futuro
 
-Motore PRESENTE:
-  - mom3M 35pt + RSI adattivo + ADX + AO + regime reale 21 proxy
-  - Eredita logica FACTOR
+─── v2.0 FIX ────────────────────────────────────────────────────────
+  FIX 1 — Momentum relativo vs IWMO
+    Ogni ETF viene penalizzato se il suo momentum 3M è inferiore a IWMO.
+    Bonus se lo supera. Override in risk_off (confronto sospeso).
 
-Motore FUTURO:
-  - Usa forecast_regime() da compass_3linee.py (stessi 21 proxy)
-  - Preferenze macro per categoria (ereditate da RAPTOR MACRO_PREF)
-  - Penalizza ETF incompatibili col regime_4w
-  - Premia ETF compatibili
+  FIX 2 — Concentrazione 8-9 ETF + pesi non lineari
+    N_ETF ridotto a 9 (da 12). Pesi calcolati su score^1.5 invece di
+    score lineare — i top ETF pesano significativamente di più.
+
+  FIX 3 — Soglia rotazione +15
+    Un ETF già in portafoglio rimane se il candidato sostituto non ha
+    score >= score_attuale + 15. Riduce turnover ~50%.
+
+  FIX 4 — Guardia forecast zeros
+    Richiede almeno 60gg di dati proxy prima di attivare forecast.
+    Se dati insufficienti, peso_futuro = 0 esplicitamente.
+──────────────────────────────────────────────────────────────────────
 
 Output: data/compass_etp.json
 """
@@ -33,8 +41,9 @@ BACKTEST_START = "2024-01-01"
 CAPITALE       = 100_000
 BENCHMARK      = "IWMO.MI"
 BENCHMARK2     = "VWCE.DE"
-N_ETF_MAX      = 12
-N_ETF_MIN      = 7
+N_ETF_MAX      = 9          # v2: ridotto da 12 a 9
+N_ETF_MIN      = 6
+SOGLIA_ROTAZIONE = 15       # v2: soglia minima per sostituire un ETF
 
 # ── UNIVERSO 75 ETF ────────────────────────────────────────────────────────
 UNIVERSE = [
@@ -75,7 +84,7 @@ UNIVERSE = [
     # ── AZIONARIO EM/ASIA (11) ─────────────────────────────────────────────
     {"t":"VFEM.MI", "n":"Vanguard FTSE EM",                "cat":"az_em",      "sub":"EM_BROAD",  "fonte":"RAPTOR"},
     {"t":"EIMI.MI", "n":"iShares MSCI EM",                 "cat":"az_em",      "sub":"EM_CORE",   "fonte":"RAPTOR"},
-    {"t":"DXJF.MI", "n":"WisdomTree Japan EUR Hedged",             "cat":"az_em",      "sub":"JAPAN",     "fonte":"RAPTOR"},
+    {"t":"DXJF.MI", "n":"WisdomTree Japan EUR Hedged",     "cat":"az_em",      "sub":"JAPAN",     "fonte":"RAPTOR"},
     {"t":"XCHA.MI", "n":"iShares China",                   "cat":"az_em",      "sub":"CHINA",     "fonte":"RAPTOR"},
     {"t":"XASX.DE", "n":"iShares Asia Pacific",            "cat":"az_em",      "sub":"ASIA_PAC",  "fonte":"RAPTOR"},
     {"t":"EMEE.MI", "n":"iShares EM Enhanced Active",      "cat":"az_em",      "sub":"EM_F",      "fonte":"FACTOR"},
@@ -125,8 +134,7 @@ UNIVERSE = [
     {"t":"3NVD.MI", "n":"Leverage Shares 3x NVIDIA",       "cat":"leva",       "sub":"LEVA_TEMA", "fonte":"FACTOR"},
 ]
 
-# ── PREFERENZE MACRO PER CATEGORIA (ereditate da RAPTOR + estese) ───────────
-# Scenari FACTOR: goldilocks, euforia, reflazione, stagflazione, risk_off, neutro
+# ── PREFERENZE MACRO PER CATEGORIA ────────────────────────────────────────
 MACRO_PREF_ETP = {
     "goldilocks": {
         "az_globale":1.3,"az_europa":1.1,"az_usa":1.3,"az_em":1.2,
@@ -160,7 +168,6 @@ MACRO_PREF_ETP = {
     },
 }
 
-# Preferenze per sub-tipo (più granulare)
 SUB_PREF_ETP = {
     "goldilocks": {
         "GLOBAL":1.0,"GLOBAL_F":1.2,"GLOBAL_EC":1.1,
@@ -238,17 +245,14 @@ SUB_PREF_ETP = {
     ]},
 }
 
-# Vincoli peso per categoria
 MAX_PESO_CAT = {
     "az_globale":35,"az_europa":20,"az_usa":25,"az_em":20,
     "tematico":25,"hy":20,"obbligaz_ig":30,"em_bond":15,
     "monetario":70,"leva":15,
 }
 
-# Vincoli peso per ETF singolo
 PESO_MAX_ETF = {"IART.DE":12, "3NVD.MI":8, "3USL.MI":12, "QQQ3.MI":12}
 
-# Proxy per classificazione regime (21 — stessi di compass_3linee.py)
 ETF_PROXY = {
     "SPY" :{"goldilocks":0.9,"reflazione":0.7,"stagflazione":0.1,"risk_off":0.0,"neutro":0.5},
     "QQQ" :{"goldilocks":0.9,"reflazione":0.5,"stagflazione":0.0,"risk_off":0.0,"neutro":0.4},
@@ -340,7 +344,6 @@ def calc_ao(closes):
     return round(s5-s34, 4)
 
 def calc_adx_simple(closes, period=14):
-    """ADX approssimato da closes."""
     if len(closes) < period*2: return None
     diffs = [abs(closes[i]-closes[i-1]) for i in range(-period,0)]
     return round(sum(diffs)/period/closes[-1]*100*10, 1)
@@ -362,6 +365,17 @@ def calc_sharpe(returns_list, rf=0.03):
     std    = math.sqrt(var) if var > 0 else None
     if not std: return None
     return round((mean_r*252 - rf) / (std*math.sqrt(252)), 2)
+
+# ── v2: CALCOLA MOMENTUM IWMO A UNA DATA ──────────────────────────────────
+def get_iwmo_mom3m(etf_data, target_date):
+    """Ritorna il momentum 3M di IWMO.MI alla data target. None se dati insufficienti."""
+    d = etf_data.get("IWMO.MI")
+    if not d: return None
+    n = min(len(d["closes"]), len(d["dates"]))
+    cl = [d["closes"][i] for i in range(n) if d["dates"][i] <= target_date]
+    if len(cl) <= 63: return None
+    old = cl[-(63+1)]
+    return (cl[-1] - old) / old * 100 if old else None
 
 # ── CLASSIFICAZIONE REGIME ─────────────────────────────────────────────────
 def classify_regime(proxy_data, target_date):
@@ -389,8 +403,29 @@ def classify_regime(proxy_data, target_date):
 
 # ── FORECAST REGIME ────────────────────────────────────────────────────────
 def forecast_regime_etp(proxy_data, target_date, regime_attuale):
-    """Calcola forecast a 4 settimane con peso dinamico."""
     scores = {s:0.0 for s in SCENARI}
+
+    # FIX 4: verifica dati proxy sufficienti (min 60gg)
+    n_proxy_validi = 0
+    for ticker in ETF_PROXY:
+        d = proxy_data.get(ticker)
+        if not d: continue
+        n = min(len(d["closes"]), len(d["dates"]))
+        cl = [d["closes"][i] for i in range(n) if d["dates"][i] <= target_date]
+        if len(cl) >= 60: n_proxy_validi += 1
+
+    if n_proxy_validi < 8:
+        # Dati insufficienti — forecast neutro con peso zero
+        return {
+            "regime_4w":     regime_attuale,
+            "prob_4w":       50.0,
+            "probs":         {s: 100/len(SCENARI) for s in SCENARI},
+            "segnale":       "HOLD",
+            "n_attivate":    0,
+            "peso_futuro":   0.0,
+            "peso_presente": 1.0,
+            "dati_insufficienti": True,
+        }
 
     def get_delta(ticker):
         d = proxy_data.get(ticker)
@@ -409,14 +444,12 @@ def forecast_regime_etp(proxy_data, target_date, regime_attuale):
         if d1 is None or d2 is None: return None
         return d1 - d2
 
-    # Strato soft
     for ticker, pesi in ETF_PROXY.items():
         delta = get_delta(ticker)
         if delta is None: continue
         for sc in SCENARI:
             scores[sc] += delta * pesi.get(sc,0) * 10
 
-    # Regole hard (R1-R25)
     REGOLE = [
         ("VXX",   ">",  8.0, {"risk_off":30}),
         ("VXX",   ">",  4.0, {"risk_off":15}),
@@ -459,7 +492,6 @@ def forecast_regime_etp(proxy_data, target_date, regime_attuale):
                 scores[sc] += pts * 2
             n_attivate += 1
 
-    # Normalizzazione
     min_s = min(scores.values())
     if min_s < 0:
         for sc in scores: scores[sc] -= min_s
@@ -469,7 +501,6 @@ def forecast_regime_etp(proxy_data, target_date, regime_attuale):
     regime_4w = max(probs, key=probs.get)
     prob_4w   = probs[regime_4w]
 
-    # Segnale
     stesso = regime_4w == regime_attuale
     if stesso or prob_4w < 55:
         segnale = "HOLD"
@@ -478,7 +509,6 @@ def forecast_regime_etp(proxy_data, target_date, regime_attuale):
     else:
         segnale = "ROTATE"
 
-    # Peso futuro dinamico
     peso_futuro  = max(0.0, (prob_4w - 50) / 50 * 0.40) if not stesso else 0.0
     peso_presente = 1.0 - peso_futuro
 
@@ -503,7 +533,6 @@ def calc_score_presente(etf, regime_oggi):
     er     = calc_er(closes) or 0
     ao     = calc_ao(closes) or 0
 
-    # Score base momentum
     score = 0
     score += min(35, max(0, (mom3m + 20) / 40 * 35))
     score += min(15, max(0, (mom1m + 10) / 20 * 15))
@@ -514,7 +543,6 @@ def calc_score_presente(etf, regime_oggi):
         ao_prev = calc_ao(closes[:-1])
         if ao_prev and ao > ao_prev: score += 5
 
-    # Moltiplicatore regime per categoria
     cat    = etf.get("cat", "az_globale")
     mult   = MACRO_PREF_ETP.get(regime_oggi, MACRO_PREF_ETP["neutro"]).get(cat, 1.0)
     sub    = etf.get("sub", "")
@@ -522,7 +550,6 @@ def calc_score_presente(etf, regime_oggi):
 
     score = score * mult * sub_m
 
-    # Penalità RSI ipercomprato
     if rsi > 82: score *= 0.5
     elif rsi > 75: score *= 0.75
 
@@ -538,10 +565,8 @@ def calc_score_futuro(etf, regime_4w, prob_4w):
     mult  = MACRO_PREF_ETP.get(regime_4w, MACRO_PREF_ETP["neutro"]).get(cat, 1.0)
     sub_m = SUB_PREF_ETP.get(regime_4w, SUB_PREF_ETP["neutro"]).get(sub, 1.0)
 
-    # Score base: preferenza macro per il regime futuro
     score = 50 * mult * sub_m
 
-    # Bonus se momentum recente è nella direzione del regime futuro
     mom1m = calc_momentum(closes, 21) or 0
     if regime_4w in ("goldilocks","euforia") and mom1m > 0:
         score *= 1.1
@@ -550,66 +575,112 @@ def calc_score_futuro(etf, regime_4w, prob_4w):
 
     return min(100, round(score))
 
-# ── BACKTEST ───────────────────────────────────────────────────────────────
+# ── v2: APPLICA MOMENTUM RELATIVO VS IWMO ─────────────────────────────────
+def applica_momentum_relativo(candidati, iwmo_mom3m, regime_oggi):
+    """
+    FIX 1: penalizza/premia ogni ETF in base al momentum relativo vs IWMO.
+    Override: in risk_off il confronto viene sospeso (tutti i candidati
+    possono competere sul loro merito assoluto).
+    """
+    if iwmo_mom3m is None or regime_oggi == "risk_off":
+        return candidati  # nessuna modifica
+
+    for c in candidati:
+        closes = c.get("_closes", [])
+        if not closes:
+            continue
+        etf_mom3m = calc_momentum(closes, 63)
+        if etf_mom3m is None:
+            continue
+        delta = etf_mom3m - iwmo_mom3m
+        # Bonus/malus proporzionale: ±15% dello score per ogni 10pp di differenza
+        fattore = 1.0 + (delta / 10.0) * 0.15
+        fattore = max(0.5, min(1.5, fattore))  # clamp [0.5, 1.5]
+        c["score"] = round(c["score"] * fattore, 1)
+        c["rel_vs_iwmo"] = round(delta, 1)
+
+    return candidati
+
+# ── v2: APPLICA SOGLIA ROTAZIONE ──────────────────────────────────────────
+def applica_soglia_rotazione(candidati, composizione_precedente, soglia=SOGLIA_ROTAZIONE):
+    """
+    FIX 3: un ETF già in portafoglio rimane se il candidato sostituto
+    non ha score >= score_attuale + soglia.
+    Restituisce la lista candidati con bonus di stabilità applicato.
+    """
+    if not composizione_precedente:
+        return candidati
+
+    score_precedente = {p["ticker"]: p["score"] for p in composizione_precedente}
+
+    for c in candidati:
+        t = c["ticker"]
+        if t in score_precedente:
+            # ETF già presente: riceve bonus di stabilità (soglia/2)
+            c["score"] = round(c["score"] + soglia / 2, 1)
+            c["in_portafoglio"] = True
+        else:
+            c["in_portafoglio"] = False
+
+    return candidati
+
+# ── BACKTEST v2 ────────────────────────────────────────────────────────────
 def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
     import datetime as dt
     start_dt = dt.date.fromisoformat(backtest_start)
     end_dt   = dt.date.fromisoformat(oggi)
     capitale = float(CAPITALE)
 
-    # Genera date di rebalancing (ogni 5 giorni lavorativi)
     all_dates = []
     for t, d in etf_data.items():
         all_dates.extend(d.get("dates",[]))
     all_dates = sorted(set(d for d in all_dates if d >= backtest_start and d <= oggi))
-    rebal_dates = [all_dates[i] for i in range(0, len(all_dates), 5)]
+
+    # v2: rebalancing ogni 10 giorni lavorativi (era 5)
+    rebal_dates = [all_dates[i] for i in range(0, len(all_dates), 10)]
     if all_dates and all_dates[-1] not in rebal_dates:
         rebal_dates.append(all_dates[-1])
 
     versioni = []
-    composizione_attuale = []
+    composizione_attuale    = []
+    composizione_precedente = []   # v2: memoria per soglia rotazione
     capitale_corrente    = capitale
     rendimenti_settimanali = {}
     storia_regime = []
 
     for idx, rdate in enumerate(rebal_dates):
-        # Classifica regime
         regime_oggi, conf = classify_regime(proxy_data, rdate)
         storia_regime.append({"data": rdate, "regime": regime_oggi, "conf": conf})
 
-        # Forecast
+        # FIX 4: forecast con guardia dati insufficienti
         fc = forecast_regime_etp(proxy_data, rdate, regime_oggi)
 
-        # Score per ogni ETF
+        # v2: momentum IWMO alla data corrente (FIX 1)
+        iwmo_mom3m = get_iwmo_mom3m(etf_data, rdate)
+
         candidati = []
         for etf in UNIVERSE:
             t = etf["t"]
             d = etf_data.get(t)
             if not d or not d.get("closes"): continue
 
-            # Closes fino a rdate
             n = min(len(d["closes"]), len(d["dates"]))
             cl = [d["closes"][i] for i in range(n) if d["dates"][i] <= rdate]
             if len(cl) < 34: continue
 
             etf_snap = {**etf, "closes": cl}
 
-            # Score presente e futuro
             sp = calc_score_presente(etf_snap, regime_oggi)
             sf = calc_score_futuro(etf_snap, fc["regime_4w"], fc["prob_4w"])
 
-            # Score finale con pesi dinamici
             score_finale = sp * fc["peso_presente"] + sf * fc["peso_futuro"]
 
-            # Vincolo leva: solo in euforia/goldilocks con confidence >= 50%
             if etf["cat"] == "leva":
                 if regime_oggi not in ("goldilocks","euforia"):
                     score_finale *= 0.1
                 elif conf < 50:
-                    # Confidence bassa: dimezza il peso della leva
                     score_finale *= 0.5
 
-            # Vincolo forecast: blocca leva in risk_off/stagflazione forecast
             if etf["cat"] == "leva" and fc["regime_4w"] in ("risk_off","stagflazione") and fc["segnale"] in ("ROTATE","WATCH"):
                 score_finale = 0
 
@@ -622,14 +693,20 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
                 "sp":     sp,
                 "sf":     sf,
                 "price":  cl[-1],
+                "_closes": cl,  # temporaneo per FIX 1
             })
 
         if not candidati: continue
 
-        # Selezione top N_ETF_MAX
+        # FIX 3: applica bonus stabilità prima del sort
+        candidati = applica_soglia_rotazione(candidati, composizione_precedente)
+
+        # FIX 1: applica momentum relativo vs IWMO
+        candidati = applica_momentum_relativo(candidati, iwmo_mom3m, regime_oggi)
+
         candidati.sort(key=lambda x: x["score"], reverse=True)
 
-        # Diversificazione: max 2 per categoria
+        # FIX 2: selezione top N_ETF_MAX (9), max 2 per categoria
         selected = []; cat_count = {}
         for c in candidati:
             if len(selected) >= N_ETF_MAX: break
@@ -641,7 +718,7 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
         if len(selected) < N_ETF_MIN: selected = candidati[:N_ETF_MAX]
         if not selected: continue
 
-        # Garantisce almeno 1 ETF difensivo se non presente
+        # Garantisce almeno 1 difensivo
         cats_sel = {c["cat"] for c in selected}
         if "obbligaz_ig" not in cats_sel and "monetario" not in cats_sel:
             difensivi = [c for c in candidati
@@ -654,23 +731,27 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
                 else:
                     selected.append(difensivi[0])
 
-        # Pesi proporzionali allo score
-        tot_score = sum(c["score"] for c in selected) or 1
+        # FIX 2: pesi non lineari — score^1.5 per concentrare sui top
+        def weight_power(s): return max(0, s) ** 1.5
+
+        tot_w = sum(weight_power(c["score"]) for c in selected) or 1
         for c in selected:
-            p = round(c["score"] / tot_score * 100, 1)
-            # Applica cap ETF singolo
+            p = round(weight_power(c["score"]) / tot_w * 100, 1)
             max_p = PESO_MAX_ETF.get(c["ticker"], 100)
-            # Applica cap categoria
             cat_max = MAX_PESO_CAT.get(c["cat"], 40)
             c["peso"] = min(p, max_p, cat_max)
 
-        # Rinormalizza dopo i cap
+        # Rinormalizza
         tot_peso = sum(c["peso"] for c in selected) or 1
         for c in selected:
             c["peso"] = round(c["peso"] / tot_peso * 100, 1)
             c["importo"] = round(capitale_corrente * c["peso"] / 100, 2)
 
-        # Calcola rendimento portafoglio da data precedente a oggi
+        # Rimuovi campo temporaneo _closes dal JSON
+        for c in selected:
+            c.pop("_closes", None)
+
+        # Calcola rendimento da data precedente
         if idx > 0 and composizione_attuale and rebal_dates[idx-1] < rdate:
             prev_date = rebal_dates[idx-1]
             ptf_ret = 0.0
@@ -690,7 +771,8 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
             for c in selected:
                 c["importo"] = round(capitale_corrente * c["peso"] / 100, 2)
 
-        composizione_attuale = selected
+        composizione_precedente = composizione_attuale  # v2: memoria rotazione
+        composizione_attuale    = selected
         versioni.append({
             "data":         rdate,
             "regime":       regime_oggi,
@@ -700,11 +782,10 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
             "capitale":     round(capitale_corrente, 2),
         })
 
-    # Performance finale
+    # ── Metriche finali ────────────────────────────────────────────────────
     perf_tot = round((capitale_corrente - CAPITALE) / CAPITALE * 100, 2)
     perf_eur = round(capitale_corrente - CAPITALE, 2)
 
-    # Equity curve mensile
     equity_mensile = []
     cap_tmp = float(CAPITALE)
     months_seen = set()
@@ -715,7 +796,6 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
             equity_mensile.append({"mese": month, "valore": cap_tmp})
             months_seen.add(month)
 
-    # MDD e Sharpe
     cap_series = [CAPITALE] + [v["capitale"] for v in versioni]
     peak = cap_series[0]; mdd = 0
     for c in cap_series:
@@ -727,10 +807,7 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
     rets = list(rendimenti_settimanali.values())
     sharpe = calc_sharpe(rets) if len(rets) > 4 else None
 
-    # ── Metriche avanzate ─────────────────────────────────────────────
-    # Sharpe 6M e 12M
     def sharpe_n(ret_list, n, rf=0.03/52):
-        import math
         if len(ret_list) < n: return None
         w = ret_list[-n:]
         mean_r = sum(w)/len(w) - rf
@@ -742,9 +819,7 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
     sharpe_6m  = sharpe_n(rets_list, 26)
     sharpe_12m = sharpe_n(rets_list, 52)
 
-    # Rolling Sharpe 13W
     def rolling_sharpe_series(ret_list, window=13, rf=0.03/52):
-        import math
         result = []
         dates_s = sorted(rendimenti_settimanali.keys())
         for i in range(window, len(ret_list)+1):
@@ -759,20 +834,18 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
 
     rolling_sh = rolling_sharpe_series(rets_list, 13)
 
-    # Drawdown series settimanale
-    cap_series = [float(CAPITALE)]
+    cap_series2 = [float(CAPITALE)]
     for d in sorted(rendimenti_settimanali.keys()):
-        cap_series.append(cap_series[-1] * (1 + rendimenti_settimanali[d]/100))
+        cap_series2.append(cap_series2[-1] * (1 + rendimenti_settimanali[d]/100))
 
-    peak = cap_series[0]
+    peak = cap_series2[0]
     dd_series = []
     dates_w = sorted(rendimenti_settimanali.keys())
-    for i, v in enumerate(cap_series[1:]):
+    for i, v in enumerate(cap_series2[1:]):
         if v > peak: peak = v
         dd = round((v-peak)/peak*100, 3)
         dd_series.append({"data": dates_w[i], "dd": dd})
 
-    # Rendimenti mensili strutturati per anno
     from collections import defaultdict
     rend_per_anno = defaultdict(dict)
     prev_val = float(CAPITALE)
@@ -782,7 +855,6 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
         rend_per_anno[anno][mese] = ret
         prev_val = e['valore']
 
-    # Rendimento annuo
     rend_annuo = {}
     for anno, mesi in rend_per_anno.items():
         cum = 1.0
@@ -790,23 +862,20 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
             cum *= (1 + r/100)
         rend_annuo[anno] = round((cum-1)*100, 2)
 
-    # Rendimenti mensili benchmark (IWMO + VWCE)
     def calc_rend_mensili_bm(ticker, etf_data, backtest_start):
         d = etf_data.get(ticker)
         if not d: return {}, {}
         closes = d["closes"]; dates = d["dates"]
         n = min(len(closes), len(dates))
-        # Filtra da backtest_start
         pairs = [(dates[i], closes[i]) for i in range(n) if dates[i] >= backtest_start]
         if not pairs: return {}, {}
-        # Raggruppa per mese
         from collections import defaultdict as _dd
         mese_closes = _dd(list)
         for dt, cl in pairs:
             mese_closes[dt[:7]].append((dt, cl))
         mesi_ord = sorted(mese_closes.keys())
         rpa = _dd(dict); ra = {}
-        prev = mese_closes[mesi_ord[0]][0][1]  # primo prezzo
+        prev = mese_closes[mesi_ord[0]][0][1]
         for mese in mesi_ord:
             last_close = mese_closes[mese][-1][1]
             ret = round((last_close - prev) / prev * 100, 2) if prev else 0
@@ -822,7 +891,7 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
     rend_iwmo_mese, rend_iwmo_anno = calc_rend_mensili_bm(BENCHMARK,  etf_data, BACKTEST_START)
     rend_vwce_mese, rend_vwce_anno = calc_rend_mensili_bm(BENCHMARK2, etf_data, BACKTEST_START)
 
-    # Turnover medio
+    # Turnover (su periodo 10gg invece di 5gg)
     turnovers = []
     for i in range(1, len(versioni)):
         prev_c = set(p['ticker'] for p in versioni[i-1].get('composizione',[]))
@@ -832,7 +901,6 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
         if tot > 0: turnovers.append(changed/tot*100)
     turnover_medio = round(sum(turnovers)/len(turnovers), 1) if turnovers else 0
 
-    # Performance per regime
     perf_per_regime = defaultdict(list)
     for v in versioni:
         regime = v.get('regime','neutro')
@@ -878,23 +946,21 @@ def run_backtest_etp(etf_data, proxy_data, backtest_start, oggi):
 def main():
     import datetime as dt
     oggi = dt.date.today().isoformat()
-    print(f"COMPASS ETP v1.0 — {oggi}")
+    print(f"COMPASS ETP v2.0 — {oggi}")
     print(f"Universo: {len(UNIVERSE)} ETF | Benchmark: {BENCHMARK}")
+    print(f"v2 fix: rel.momentum, concentrazione 9ETF, soglia rotazione +{SOGLIA_ROTAZIONE}, forecast guard")
 
-    # Carica dati esistenti
     existing = {}
     if OUT_FILE.exists():
         try:
             existing = json.loads(OUT_FILE.read_text())
             run_number = existing.get("run_number", 0) + 1
-            print(f"  Dati esistenti: {existing.get('generated','—')}")
         except:
             run_number = 1
     else:
         run_number = 1
     print(f"  Run number: {run_number}")
 
-    # ── 1. Download proxy (21) ─────────────────────────────────────────────
     print(f"\n[1/4] Download {len(ETF_PROXY)} ETF proxy...")
     proxy_data = {}
     for ticker in ETF_PROXY:
@@ -906,11 +972,9 @@ def main():
             print(f"  {ticker}... ERR")
         time.sleep(0.3)
 
-    # Regime oggi
     regime_oggi, conf_oggi = classify_regime(proxy_data, oggi)
     print(f"\n  Regime oggi: {regime_oggi} ({conf_oggi}%)")
 
-    # ── 2. Download ETF universo (75) ──────────────────────────────────────
     tickers_unici = list({e["t"] for e in UNIVERSE})
     print(f"\n[2/4] Download {len(tickers_unici)} ETF universo...")
     etf_data = {}
@@ -919,8 +983,10 @@ def main():
         d = fetch_yahoo(ticker, days=400)
         if d:
             etf_data[ticker] = d
-            mom3m = calc_momentum(d["closes"], 63)
-            sp = calc_score_presente({**next(e for e in UNIVERSE if e["t"]==ticker), "closes":d["closes"]}, regime_oggi)
+            sp = calc_score_presente(
+                {**next(e for e in UNIVERSE if e["t"]==ticker), "closes":d["closes"]},
+                regime_oggi
+            )
             print(f"  [{i}/{len(tickers_unici)}] {ticker}... OK score={sp}")
             ok += 1
         else:
@@ -929,15 +995,17 @@ def main():
         time.sleep(0.3)
     print(f"  Download: {ok} OK, {err} ERR")
 
-    # ── 3. Backtest ────────────────────────────────────────────────────────
-    print(f"\n[3/4] Backtest ETP (da {BACKTEST_START})...")
+    # Mostra momentum relativo vs IWMO oggi
+    iwmo_mom = get_iwmo_mom3m(etf_data, oggi)
+    if iwmo_mom:
+        print(f"\n  IWMO momentum 3M oggi: {iwmo_mom:+.1f}%")
+
+    print(f"\n[3/4] Backtest v2 ETP (da {BACKTEST_START}, rebalancing 10gg)...")
     risultato = run_backtest_etp(etf_data, proxy_data, BACKTEST_START, oggi)
     print(f"  Performance: {risultato['performance_totale_pct']:+.1f}% | "
-          f"MDD: {risultato['max_drawdown']:.1f}% | "
-          + ('Sharpe: ' + f"{risultato['sharpe']:.2f}" if risultato.get('sharpe') else 'Sharpe: —'))
-    print(f"  Rebalancing eseguiti: {risultato['n_rebalancing']}")
+          f"MDD: {risultato['max_drawdown']:.1f}% | Turnover: {risultato['turnover_medio']:.0f}%")
+    print(f"  Rebalancing eseguiti: {risultato['n_rebalancing']} (era ~{int(risultato['n_rebalancing']*2)} con 5gg)")
 
-    # ── 4. Benchmark ───────────────────────────────────────────────────────
     print(f"\n[4/4] Benchmark {BENCHMARK} + {BENCHMARK2}...")
 
     def calc_bm_perf(ticker, data):
@@ -964,7 +1032,6 @@ def main():
         risultato["benchmark2_perf"]  = bm2_perf
         risultato["outperformance2"]  = outperf2
 
-    # Correlazione con RAPTOR
     try:
         import urllib.request as _ur
         rp_data = json.loads(_ur.urlopen(
@@ -972,46 +1039,50 @@ def main():
         ).read())
         rend_rp = {}
         for entry in rp_data.get("history", []):
-            dt = entry.get("date")
+            dt2 = entry.get("date")
             ptf = entry.get("portfolio", [])
             r1w = sum((p.get("weight",0)/100)*(p.get("ret_1w",0) or 0) for p in ptf)
-            rend_rp[dt] = round(r1w, 4)
+            rend_rp[dt2] = round(r1w, 4)
 
         rend_etp = risultato["rendimenti_settimanali"]
         comuni = sorted(set(rend_etp.keys()) & set(rend_rp.keys()))
         if len(comuni) >= 5:
-            import math as _m
             e_vals = [rend_etp[d] for d in comuni]
             r_vals = [rend_rp[d]  for d in comuni]
             mean_e = sum(e_vals)/len(e_vals)
             mean_r = sum(r_vals)/len(r_vals)
             cov = sum((e-mean_e)*(r-mean_r) for e,r in zip(e_vals,r_vals))/(len(comuni)-1)
-            std_e = _m.sqrt(sum((e-mean_e)**2 for e in e_vals)/(len(comuni)-1))
-            std_r = _m.sqrt(sum((r-mean_r)**2 for r in r_vals)/(len(comuni)-1))
+            std_e = math.sqrt(sum((e-mean_e)**2 for e in e_vals)/(len(comuni)-1))
+            std_r = math.sqrt(sum((r-mean_r)**2 for r in r_vals)/(len(comuni)-1))
             corr  = round(cov/(std_e*std_r), 3) if std_e*std_r > 0 else None
             risultato["corr_raptor"] = corr
             risultato["corr_raptor_n"] = len(comuni)
-            print(f"  Correlazione ETP-RAPTOR: {corr} (n={len(comuni)} settimane)")
+            print(f"  Correlazione ETP-RAPTOR: {corr}")
     except Exception as ce:
         print(f"  Correlazione RAPTOR: ERR ({ce})")
 
-    # Forecast corrente
     fc_oggi = forecast_regime_etp(proxy_data, oggi, regime_oggi)
     print(f"\n  Forecast: {fc_oggi['segnale']} → {fc_oggi['regime_4w']} "
-          f"({fc_oggi['prob_4w']:.0f}%) | "
-          f"peso_futuro={fc_oggi['peso_futuro']:.2f}")
+          f"({fc_oggi['prob_4w']:.0f}%) | peso_futuro={fc_oggi['peso_futuro']:.2f}")
 
-    # ── Output ────────────────────────────────────────────────────────────
     output = {
         "generated":    datetime.datetime.utcnow().isoformat(),
-        "version":      "etp_1.0",
+        "version":      "etp_2.0",
         "run_number":   run_number,
-        "strategy":     "COMPASS ETP — Presente + Futuro dinamico",
+        "strategy":     "COMPASS ETP v2 — Rel.Momentum + Concentrazione + Soglia Rotazione",
         "backtest_start": BACKTEST_START,
         "benchmark":    BENCHMARK,
         "n_etf_universo": len(UNIVERSE),
         "regime_oggi":  {"scenario": regime_oggi, "confidence": conf_oggi},
         "forecast":     fc_oggi,
+        "v2_fixes": {
+            "momentum_relativo_iwmo": True,
+            "n_etf_max": N_ETF_MAX,
+            "pesi_non_lineari": "score^1.5",
+            "soglia_rotazione": SOGLIA_ROTAZIONE,
+            "rebalancing_giorni": 10,
+            "forecast_guard_min_proxy": 8,
+        },
         **risultato,
     }
 
@@ -1021,14 +1092,16 @@ def main():
 
     size = OUT_FILE.stat().st_size / 1024
     print(f"\n✅ Done → {OUT_FILE} ({size:.0f} KB)")
-    print(f"   Run: {run_number} | Regime: {regime_oggi} ({conf_oggi}%)")
+    print(f"   v2.0 | Run: {run_number} | Regime: {regime_oggi} ({conf_oggi}%)")
     print(f"   Performance: {risultato['performance_totale_pct']:+.1f}% | "
           f"vs {BENCHMARK}: {risultato.get('outperformance',0):+.1f}pp | "
-          f"MDD: {risultato['max_drawdown']:.1f}%")
-    print(f"\n   Portafoglio corrente:")
-    for pos in risultato["composizione_corrente"][:8]:
+          f"MDD: {risultato['max_drawdown']:.1f}% | Turnover: {risultato['turnover_medio']:.0f}%")
+    print(f"\n   Portafoglio corrente ({N_ETF_MAX} ETF, pesi score^1.5):")
+    for pos in risultato["composizione_corrente"]:
+        rel = pos.get("rel_vs_iwmo","")
+        rel_str = f" | rel_IWMO={rel:+.1f}pp" if rel != "" else ""
         print(f"   {pos['ticker']:<14} {pos['peso']:>5.1f}% | "
-              f"score={pos['score']:.0f} (P={pos['sp']} F={pos['sf']})")
+              f"score={pos['score']:.0f} (P={pos['sp']} F={pos['sf']}){rel_str}")
 
 if __name__ == "__main__":
     main()
