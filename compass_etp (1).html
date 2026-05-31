@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMPASS ETP — IWMO+</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#fff;--ink:#111;--dim:#666;--rule:#e5e5e5;
+  --green:#16a34a;--red:#dc2626;--gold:#b45309;--blue:#2563eb;
+  --etp:#7c3aed;--card:#f9f9f9;--xeon:#0891b2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+header{padding:18px 32px 14px;border-bottom:2px solid var(--ink);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+header h1{font-size:20px;font-weight:700}
+header h1 span{color:var(--etp)}
+header h1 small{font-size:13px;color:var(--dim);font-weight:400;margin-left:6px}
+.nav-link{font-size:11px;font-family:monospace;color:var(--dim);text-decoration:none;padding:4px 10px;border:1px solid var(--rule);border-radius:2px}
+.nav-link:hover{border-color:var(--ink);color:var(--ink)}
+.ts{font-size:11px;color:var(--dim);font-family:monospace}
+main{max-width:1300px;margin:0 auto;padding:16px 32px 64px}
+.sec{font-family:monospace;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);padding:18px 0 10px;border-top:1px solid var(--rule)}
+.sec:first-of-type{border-top:none;padding-top:0}
+.sec-row{display:flex;align-items:center;justify-content:space-between}
+
+/* KPI */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden;margin-bottom:16px}
+.kpi{background:var(--bg);padding:12px 14px}
+.kpi .k{font-size:9px;font-family:monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:3px}
+.kpi .v{font-size:17px;font-weight:700;font-family:monospace}
+.kpi .v.pos{color:var(--green)}.kpi .v.neg{color:var(--red)}.kpi .v.etp{color:var(--etp)}.kpi .v.xeon{color:var(--xeon)}
+.kpi .sub{font-size:10px;color:var(--dim);margin-top:2px;font-family:monospace}
+
+/* TABS */
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--rule);margin-bottom:16px;overflow-x:auto}
+.tab{padding:9px 18px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:none;color:var(--dim);border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap;font-family:inherit}
+.tab.active{color:var(--ink);border-bottom-color:var(--etp);font-weight:600}
+.tab-panel{display:none}.tab-panel.active{display:block}
+
+/* SEGNALI IWMO */
+.segnali-strip{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;padding:16px 20px;border:1.5px solid var(--rule);border-radius:4px;margin-bottom:16px}
+.segnali-strip.s0{border-color:#16a34a30;background:#f0fdf4}
+.segnali-strip.s1{border-color:#b4530930;background:#fffbeb}
+.segnali-strip.s2{border-color:#dc262630;background:#fef2f2}
+.segnali-strip.s3{border-color:#dc2626;background:#fee2e2}
+.seg-badge{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;font-family:monospace;color:#fff;flex-shrink:0}
+.seg-badge.s0{background:#16a34a}.seg-badge.s1{background:#b45309}
+.seg-badge.s2{background:#dc2626}.seg-badge.s3{background:#7f1d1d}
+.seg-pill{display:inline-block;padding:3px 10px;border-radius:20px;font-family:monospace;font-size:11px;font-weight:600;margin:2px}
+.seg-pill.on{background:#dc2626;color:#fff}.seg-pill.off{background:#f0f0f0;color:#666}
+
+/* TABELLE */
+.data-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.data-table th{padding:8px 10px;text-align:left;font-family:monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border-bottom:2px solid var(--ink)}
+.data-table td{padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+.data-table tr:hover td{background:#fafafa}
+.data-table tr.xeon-row td{background:#f0f9ff;color:var(--xeon)}
+
+/* AZIONE BADGE */
+.az-badge{display:inline-block;padding:2px 8px;border-radius:2px;font-family:monospace;font-size:10px;font-weight:700;color:#fff;white-space:nowrap}
+.az-badge.ACQUISTA{background:#16a34a}.az-badge.MANTIENI{background:#6b7280}
+.az-badge.RAFFORZA{background:#2563eb}.az-badge.CASH{background:var(--xeon)}
+.commento{font-size:10px;color:var(--dim);margin-top:4px;line-height:1.4;max-width:320px}
+
+/* RENDIMENTI MENSILI */
+.cal-table{width:100%;border-collapse:collapse;font-size:12px;font-family:monospace}
+.cal-table th{padding:6px 8px;text-align:center;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border-bottom:2px solid var(--ink)}
+.cal-table td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--rule);border-right:1px solid var(--rule)}
+.cal-table td.pos{background:#dcfce7;color:var(--green);font-weight:600}
+.cal-table td.neg{background:#fee2e2;color:var(--red);font-weight:600}
+.cal-table td.anno{font-weight:700;text-align:left;background:var(--card)}
+.cal-table td.totale{font-weight:700;border-left:2px solid var(--ink)}
+.cal-table td.empty{color:var(--dim)}
+
+/* CAT BADGE */
+.cat-badge{display:inline-block;padding:1px 6px;border-radius:2px;font-family:monospace;font-size:9px;font-weight:600;color:#fff}
+.cat-badge.az_globale{background:#2563eb}.cat-badge.az_europa{background:#16a34a}
+.cat-badge.az_usa{background:#0284c7}.cat-badge.az_em{background:#b45309}
+.cat-badge.tematico{background:#7c3aed}.cat-badge.leva{background:#1a1a1a}
+.cat-badge.monetario{background:var(--xeon)}
+
+/* STORIA SEGNALI */
+.sh-wrap{display:flex;gap:4px;flex-wrap:wrap}
+.sh-pill{padding:3px 8px;border-radius:20px;font-family:monospace;font-size:10px;font-weight:600;color:#fff}
+.sh-pill.s0{background:#16a34a}.sh-pill.s1{background:#b45309}
+.sh-pill.s2{background:#dc2626}.sh-pill.s3{background:#7f1d1d}
+
+/* UNIVERSO */
+.universo-wrap{overflow-x:auto;margin-top:8px}
+.universo-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.universo-table th{padding:6px 8px;text-align:left;font-family:monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border-bottom:2px solid var(--ink);white-space:nowrap}
+.universo-table td{padding:5px 8px;border-bottom:1px solid var(--rule);vertical-align:middle}
+.universo-table tr.in-ptf td{background:#f0fdf4}
+.universo-table tr.in-ptf:hover td{background:#dcfce7}
+.universo-table tr:hover td{background:#fafafa}
+.in-ptf-dot{display:inline-block;width:6px;height:6px;background:var(--green);border-radius:50%;margin-right:4px;vertical-align:middle}
+
+/* CONFRONTO */
+.corr-box{padding:20px 24px;border:1.5px solid var(--rule);border-radius:4px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.corr-item{text-align:center}
+.corr-item .cv{font-size:32px;font-weight:700;font-family:monospace}
+.corr-item .cl{font-size:11px;color:var(--dim);margin-top:4px}
+.corr-item .cs{font-size:11px;margin-top:8px;padding:3px 10px;border-radius:20px;display:inline-block;font-family:monospace}
+
+.btn-export{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--ink);color:#fff;border:none;border-radius:3px;font-family:monospace;font-size:11px;cursor:pointer;font-weight:600}
+.btn-export:hover{background:#333}
+.scenario-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:8px}
+.sc-card{padding:14px 16px;border:1.5px solid var(--rule);border-radius:4px}
+.sc-card h3{font-family:monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;font-weight:600}
+.sc-card .sc-val{font-size:20px;font-weight:700;font-family:monospace}
+.sc-card .sc-sub{font-size:11px;color:var(--dim);margin-top:4px}
+
+canvas{display:block;width:100%}
+.loading{padding:48px;text-align:center;color:var(--dim);font-family:monospace;animation:pulse 1.5s infinite}
+.err{padding:32px;text-align:center;color:var(--red);font-family:monospace}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@media(max-width:900px){header,main{padding-left:16px;padding-right:16px}.corr-box{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>COMPASS <span>ETP</span> <small>IWMO+</small></h1>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <a href="index.html" class="nav-link">← FACTOR</a>
+    <a href="strategia-3linee.html" class="nav-link">3 Linee</a>
+    <a href="fase2.html" class="nav-link">Fase 2</a>
+    <a href="confronto.html" class="nav-link">Confronto</a>
+    <span class="ts" id="ts-update">—</span>
+  </div>
+</header>
+<main>
+  <div id="loading" class="loading">Caricamento IWMO+...</div>
+  <div id="content" style="display:none">
+
+    <div class="sec">Performance</div>
+    <div class="kpi-grid" id="kpi-grid"></div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('overview')">📊 Overview</button>
+      <button class="tab" onclick="showTab('rendimenti')">📅 Rendimenti</button>
+      <button class="tab" onclick="showTab('rischio')">📉 Rischio</button>
+      <button class="tab" onclick="showTab('portafoglio')">🗂 Portafoglio</button>
+      <button class="tab" onclick="showTab('segnali')">🚦 Segnali IWMO</button>
+      <button class="tab" onclick="showTab('confronto')">⚖ Confronto</button>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="tab-panel active" id="tab-overview">
+      <div class="sec" style="padding-top:0;border-top:none">Equity curve (mensile)</div>
+      <canvas id="c-equity" height="260" style="margin-bottom:16px"></canvas>
+      <div class="sec">Performance per livello di protezione</div>
+      <div class="scenario-grid" id="step-grid"></div>
+    </div>
+
+    <!-- RENDIMENTI -->
+    <div class="tab-panel" id="tab-rendimenti">
+      <div class="sec" style="padding-top:0;border-top:none">Rendimenti mensili (%) — heatmap</div>
+      <table class="cal-table" id="cal-table"></table>
+      <div id="cal-legend" style="margin-top:12px;font-size:11px;color:var(--dim)"></div>
+    </div>
+
+    <!-- RISCHIO -->
+    <div class="tab-panel" id="tab-rischio">
+      <div class="sec" style="padding-top:0;border-top:none">Drawdown nel tempo</div>
+      <canvas id="c-dd" height="200" style="margin-bottom:16px"></canvas>
+      <div class="sec">Rolling Sharpe (13 settimane)</div>
+      <canvas id="c-sharpe" height="180" style="margin-bottom:16px"></canvas>
+      <div class="sec">Metriche di rischio</div>
+      <div class="kpi-grid" id="risk-kpi"></div>
+    </div>
+
+    <!-- PORTAFOGLIO -->
+    <div class="tab-panel" id="tab-portafoglio">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:20px;align-items:start">
+        <div>
+          <div class="sec" style="padding-top:0;border-top:none">Composizione corrente — azioni operative</div>
+          <table class="data-table">
+            <thead><tr>
+              <th>Ticker</th><th>Nome</th><th>Cat.</th><th>Peso</th>
+              <th>Score</th><th>Mom 6M</th><th>Mom 3M</th><th>Mom 1M</th>
+              <th>ER</th><th>KAMA</th><th>Ingresso</th><th>Azione &amp; Commento</th>
+            </tr></thead>
+            <tbody id="comp-tbody"></tbody>
+          </table>
+
+          <div class="sec">ETF usciti dall'ultimo rebalancing</div>
+          <table class="data-table">
+            <thead><tr><th>Ticker</th><th>Nome</th><th>Cat.</th><th>Motivo uscita</th></tr></thead>
+            <tbody id="usciti-tbody"></tbody>
+          </table>
+        </div>
+        <div style="min-width:260px">
+          <div class="sec" style="padding-top:0;border-top:none">Per categoria</div>
+          <canvas id="c-donut" height="260"></canvas>
+          <div style="margin-top:10px;font-size:11px;color:var(--dim);font-family:monospace">
+            Turnover medio: <strong id="turnover-val">—</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- UNIVERSO -->
+      <div class="sec sec-row">
+        <span>Universo IWMO+ — 52 ETF momentum puri</span>
+        <button class="btn-export" onclick="esportaExcel()">⬇ Scarica Excel</button>
+      </div>
+      <p style="font-size:11px;color:var(--dim);margin-bottom:8px">🟢 Sfondo verde = in portafoglio oggi</p>
+      <div class="universo-wrap">
+        <table class="universo-table">
+          <thead><tr>
+            <th>#</th><th>Ticker</th><th>Nome</th><th>Cat.</th><th>Sub</th>
+            <th>In ptf</th><th>Peso %</th><th>Score</th>
+            <th>Mom 6M</th><th>Mom 3M</th><th>Mom 1M</th><th>ER</th><th>Ingresso</th>
+          </tr></thead>
+          <tbody id="universo-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SEGNALI IWMO -->
+    <div class="tab-panel" id="tab-segnali">
+      <div class="sec" style="padding-top:0;border-top:none">Stato segnali oggi</div>
+      <div id="segnali-strip-main"></div>
+      <div class="sec">Storia segnali (ultimi 30 rebalancing)</div>
+      <div class="sh-wrap" id="storia-segnali"></div>
+      <div class="sec">Storico versioni portafoglio</div>
+      <table class="data-table">
+        <thead><tr><th>Data</th><th>Segnali</th><th>Quota Az %</th><th>Capitale</th><th>N ETF</th><th>S1</th><th>S2</th><th>S3</th></tr></thead>
+        <tbody id="ver-body"></tbody>
+      </table>
+    </div>
+
+    <!-- CONFRONTO -->
+    <div class="tab-panel" id="tab-confronto">
+      <div class="sec" style="padding-top:0;border-top:none">vs Benchmark</div>
+      <div class="corr-box" id="bm-box"></div>
+      <div class="sec">Metriche confronto</div>
+      <div class="kpi-grid" id="bm-kpi"></div>
+    </div>
+
+  </div>
+  <div id="err" class="err" style="display:none"></div>
+</main>
+
+<script>
+const URL_ETP='https://giorgiogoldoni.github.io/FACTOR/data/compass_etp.json';
+const fmt=(n,d=1)=>n==null?'—':(n>=0?'+':'')+n.toFixed(d)+'%';
+const fmtC=n=>n==null?'—':Math.round(n).toLocaleString('it')+'€';
+const cap1=s=>s?s.charAt(0).toUpperCase()+s.slice(1):s;
+const CC={az_globale:'#2563eb',az_europa:'#16a34a',az_usa:'#0284c7',az_em:'#b45309',tematico:'#7c3aed',leva:'#1a1a1a',monetario:'#0891b2'};
+const SC=['#16a34a','#b45309','#dc2626','#7f1d1d'];
+const SL=['0 segnali — 100% momentum','1 segnale — 70% mom + 30% XEON','2 segnali — 30% mom + 70% XEON','3 segnali — 100% XEON'];
+
+const UNIVERSO=[
+  {t:"WWRD.MI",n:"WT World",cat:"az_globale",sub:"GLOBAL"},
+  {t:"SWDA.MI",n:"iShares Core MSCI World",cat:"az_globale",sub:"GLOBAL"},
+  {t:"VWCE.DE",n:"Vanguard FTSE All-World",cat:"az_globale",sub:"GLOBAL"},
+  {t:"XDWT.MI",n:"Xtrackers MSCI World Swap",cat:"az_globale",sub:"GLOBAL"},
+  {t:"IWMO.MI",n:"iShares MSCI World Momentum",cat:"az_globale",sub:"GLOBAL_MOM"},
+  {t:"IWQU.MI",n:"iShares MSCI World Quality",cat:"az_globale",sub:"GLOBAL_F"},
+  {t:"WOEE.DE",n:"iShares World Enhanced Active",cat:"az_globale",sub:"GLOBAL_F"},
+  {t:"IFSW.MI",n:"iShares STOXX World Multifactor",cat:"az_globale",sub:"GLOBAL_F"},
+  {t:"JPGL.MI",n:"JPMorgan Global Multi-Factor",cat:"az_globale",sub:"GLOBAL_F"},
+  {t:"FCRN.DE",n:"iShares World Factor Rotation",cat:"az_globale",sub:"GLOBAL_F"},
+  {t:"NTSX.MI",n:"WT US Efficient Core",cat:"az_globale",sub:"GLOBAL_EC"},
+  {t:"NTSG.MI",n:"WT Global Efficient Core",cat:"az_globale",sub:"GLOBAL_EC"},
+  {t:"IBCZ.DE",n:"iShares STOXX World MF",cat:"az_globale",sub:"GLOBAL_F"},
+  {t:"WS5X.MI",n:"WT Euro Stoxx 50",cat:"az_europa",sub:"EU"},
+  {t:"SMEA.MI",n:"iShares Europe Small Cap",cat:"az_europa",sub:"EU_SMALL"},
+  {t:"EXX5.DE",n:"iShares EURO STOXX 50",cat:"az_europa",sub:"EU"},
+  {t:"EXV1.DE",n:"iShares STOXX Europe 600",cat:"az_europa",sub:"EU"},
+  {t:"EUEE.DE",n:"iShares Europe Enhanced Active",cat:"az_europa",sub:"EU_F"},
+  {t:"IEMO.MI",n:"iShares MSCI Europe Momentum",cat:"az_europa",sub:"EU_MOM"},
+  {t:"IEQU.MI",n:"iShares MSCI Europe Quality",cat:"az_europa",sub:"EU_F"},
+  {t:"EXXW.DE",n:"iShares MSCI Europe",cat:"az_europa",sub:"EU"},
+  {t:"WSPX.MI",n:"WT S&P 500",cat:"az_usa",sub:"US"},
+  {t:"WNAS.MI",n:"WT Nasdaq-100",cat:"az_usa",sub:"TECH"},
+  {t:"CSSPX.MI",n:"iShares Core S&P 500",cat:"az_usa",sub:"US"},
+  {t:"USEE.DE",n:"iShares US Enhanced Active",cat:"az_usa",sub:"US_F"},
+  {t:"QDVB.DE",n:"iShares MSCI USA Quality",cat:"az_usa",sub:"US_F"},
+  {t:"XUTC.MI",n:"Xtrackers MSCI USA IT",cat:"az_usa",sub:"TECH"},
+  {t:"WRTY.MI",n:"WT Russell 2000 Efficient Core",cat:"az_usa",sub:"US_SMALL"},
+  {t:"WSPE.MI",n:"WT S&P 500 EUR Hedged",cat:"az_usa",sub:"US_EUR"},
+  {t:"VFEM.MI",n:"Vanguard FTSE EM",cat:"az_em",sub:"EM_BROAD"},
+  {t:"EIMI.MI",n:"iShares MSCI EM",cat:"az_em",sub:"EM_CORE"},
+  {t:"DXJF.MI",n:"WisdomTree Japan EUR Hedged",cat:"az_em",sub:"JAPAN"},
+  {t:"XCHA.MI",n:"iShares China",cat:"az_em",sub:"CHINA"},
+  {t:"XASX.DE",n:"iShares Asia Pacific",cat:"az_em",sub:"ASIA_PAC"},
+  {t:"EMEE.MI",n:"iShares EM Enhanced Active",cat:"az_em",sub:"EM_F"},
+  {t:"AXEE.MI",n:"iShares Asia ex Japan Enhanced",cat:"az_em",sub:"ASIA_F"},
+  {t:"IS3N.DE",n:"iShares MSCI EM Small Cap",cat:"az_em",sub:"EM_SMALL"},
+  {t:"VAPX.MI",n:"Vanguard Dev Asia Pacific",cat:"az_em",sub:"ASIA_PAC"},
+  {t:"JPNH.MI",n:"Amundi MSCI Japan EUR Hdg",cat:"az_em",sub:"JAPAN"},
+  {t:"NTSZ.MI",n:"WT EM Efficient Core",cat:"az_em",sub:"EM_EC"},
+  {t:"PHAU.MI",n:"WT Physical Gold",cat:"tematico",sub:"GOLD"},
+  {t:"CRUD.MI",n:"WT WTI Crude Oil",cat:"tematico",sub:"CRUDE"},
+  {t:"SMH.MI",n:"VanEck Semiconductor",cat:"tematico",sub:"TECH_T"},
+  {t:"DFNS.MI",n:"VanEck Defense",cat:"tematico",sub:"DEFENSE"},
+  {t:"IART.DE",n:"iShares AI Innovation",cat:"tematico",sub:"AI"},
+  {t:"RARE.MI",n:"VanEck Rare Earth",cat:"tematico",sub:"MATERIALS"},
+  {t:"COPA.MI",n:"WT Copper",cat:"tematico",sub:"MATERIALS"},
+  {t:"CMOD.MI",n:"iShares Commodity",cat:"tematico",sub:"COMMODITY"},
+  {t:"IFFF.MI",n:"iShares MSCI Global Financials",cat:"tematico",sub:"FINANCIAL"},
+  {t:"AIGA.MI",n:"WT Agriculture",cat:"tematico",sub:"COMMODITY"},
+  {t:"3USL.MI",n:"WT S&P 500 3x Lev",cat:"leva",sub:"LEVA_US"},
+  {t:"QQQ3.MI",n:"WT Nasdaq 3x Lev",cat:"leva",sub:"LEVA_US"},
+  {t:"3NVD.MI",n:"Leverage Shares 3x NVIDIA",cat:"leva",sub:"LEVA_TEMA"},
+];
+
+function showTab(id){
+  const ids=['overview','rendimenti','rischio','portafoglio','segnali','confronto'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',ids[i]===id));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+id));
+  if(id==='rischio'){setTimeout(()=>{drawDD();drawRollingS();},50);}
+  if(id==='overview'){setTimeout(()=>drawEquity(),50);}
+}
+
+function segnaliHtml(seg, large=false){
+  if(!seg) return '';
+  const ns=seg.n_segnali||0;
+  const pills=[
+    `<span class="seg-pill ${seg.s1?'on':'off'}">S1 Mom1M${seg.s1?'✓':'✗'}</span>`,
+    `<span class="seg-pill ${seg.s2?'on':'off'}">S2 KAMA${seg.s2?'✓':'✗'}</span>`,
+    `<span class="seg-pill ${seg.s3?'on':'off'}">S3 Max60gg${seg.s3?'✓':'✗'}</span>`,
+  ].join('');
+  const quota=[100,70,30,0][Math.min(ns,3)];
+  return `
+    <div class="segnali-strip s${ns}">
+      <div style="text-align:center">
+        <div class="seg-badge s${ns}">${ns}/3</div>
+        <div style="margin-top:8px;font-size:11px;font-family:monospace;font-weight:600;color:${SC[ns]}">${quota}% momentum</div>
+        <div style="font-size:10px;color:var(--dim);margin-top:2px">${100-quota}% XEON</div>
+      </div>
+      <div>
+        <div style="margin-bottom:8px">${pills}</div>
+        <div style="font-size:11px;font-family:monospace;color:var(--dim)">${seg.descrizione||''}</div>
+        <div style="font-size:10px;color:var(--dim);margin-top:6px">${SL[Math.min(ns,3)]}</div>
+      </div>
+    </div>`;
+}
+
+let DATA=null, UNIVERSO_RICH=[];
+
+async function load(){
+  try{
+    const r=await fetch(URL_ETP+'?t='+Date.now());
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    DATA=await r.json();
+    render(DATA);
+  }catch(e){
+    document.getElementById('loading').style.display='none';
+    const el=document.getElementById('err');
+    el.style.display='block';
+    el.textContent='Errore caricamento: '+e.message;
+  }
+}
+
+function render(d){
+  document.getElementById('loading').style.display='none';
+  document.getElementById('content').style.display='block';
+  document.getElementById('ts-update').textContent=d.generated?new Date(d.generated).toLocaleString('it'):'—';
+
+  const seg=d.segnali_oggi||{};
+  const ns=seg.n_segnali||0;
+  const quota_az=seg.quota_az_pct||100;
+  const sh6=d.sharpe_6m, sh12=d.sharpe_12m;
+
+  // ── KPI ──────────────────────────────────────────────────────────
+  const kpis=[
+    {k:'Strategia',v:'IWMO+',cls:'etp',sub:'Momentum puro'},
+    {k:'Performance',v:fmt(d.performance_totale_pct),cls:d.performance_totale_pct>=0?'pos':'neg',sub:'da '+d.backtest_start},
+    {k:'Capitale',v:fmtC(d.capitale_attuale),cls:'',sub:'su €100k iniziali'},
+    {k:'vs IWMO',v:d.outperformance!=null?fmt(d.outperformance):'—',cls:(d.outperformance||0)>=0?'pos':'neg',sub:'benchmark primario'},
+    {k:'vs VWCE',v:d.outperformance2!=null?fmt(d.outperformance2):'—',cls:(d.outperformance2||0)>=0?'pos':'neg',sub:'benchmark secondario'},
+    {k:'MDD',v:fmt(d.max_drawdown),cls:'neg',sub:'max drawdown'},
+    {k:'Sharpe 12M',v:sh12?sh12.toFixed(2):(sh6?sh6.toFixed(2)+' (6M)':'—'),cls:'',sub:'risk-adjusted'},
+    {k:'Turnover',v:d.turnover_medio?d.turnover_medio.toFixed(0)+'%':'—',cls:'',sub:'per rebalancing'},
+    {k:'Segnali IWMO',v:ns+'/3',cls:ns===0?'pos':ns>=2?'neg':'',sub:quota_az+'% azionario'},
+    {k:'Regime XEON',v:ns===0?'OFF':ns===3?'FULL':'PARZ.',cls:ns===0?'pos':ns>=2?'xeon':'',sub:SL[Math.min(ns,3)].split('—')[0].trim()},
+  ];
+  const kg=document.getElementById('kpi-grid');
+  kpis.forEach(k=>{kg.innerHTML+=`<div class="kpi"><div class="k">${k.k}</div><div class="v ${k.cls}">${k.v}</div><div class="sub">${k.sub}</div></div>`;});
+
+  setTimeout(()=>drawEquity(),50);
+
+  // Step performance grid
+  const sg=document.getElementById('step-grid');
+  const ps=d.perf_per_step||{};
+  [0,1,2,3].forEach(ns=>{
+    const info=ps[String(ns)]; if(!info) return;
+    const col=SC[ns], rate=info.media_sett||0;
+    sg.innerHTML+=`<div class="sc-card" style="border-color:${col}30">
+      <h3 style="color:${col}">${ns} segnali</h3>
+      <div class="sc-val" style="color:${rate>=0?'var(--green)':'var(--red)'}">${rate>=0?'+':''}${rate.toFixed(2)}%</div>
+      <div class="sc-sub">${info.label||''}</div>
+      <div class="sc-sub" style="margin-top:4px">${info.n} periodi</div>
+    </div>`;
+  });
+
+  // Rendimenti mensili
+  const rpa=d.rend_per_anno||{}, ra=d.rend_annuo||{};
+  const riw=d.rend_iwmo_mese||{}, riwa=d.rend_iwmo_anno||{};
+  const MN=['01','02','03','04','05','06','07','08','09','10','11','12'];
+  const ML=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  const ct=document.getElementById('cal-table');
+  ct.innerHTML=`<thead><tr><th rowspan="2">Anno</th>${ML.map(m=>`<th>${m}</th>`).join('')}<th rowspan="2">Tot</th></tr></thead><tbody>`;
+  Object.keys(rpa).sort().forEach(anno=>{
+    const me=rpa[anno]||{}, mi=riw[anno]||{}, tot=ra[anno], totI=riwa[anno];
+    let r1=`<tr><td class="anno" rowspan="3">${anno}</td>`;
+    MN.forEach(m=>{const v=me[m]; r1+=v==null?`<td class="empty">—</td>`:`<td class="${v>=0?'pos':'neg'}">${v>=0?'+':''}${v.toFixed(1)}</td>`;});
+    r1+=`<td class="totale ${(tot||0)>=0?'pos':'neg'}">${tot!=null?(tot>=0?'+':'')+tot.toFixed(1):'—'}</td></tr>`;
+    let r2=`<tr style="font-size:10px;opacity:0.7">`;
+    MN.forEach(m=>{const v=mi[m]; r2+=v==null?`<td class="empty" style="font-size:10px">—</td>`:`<td class="${v>=0?'pos':'neg'}" style="font-size:10px">iw ${v>=0?'+':''}${v.toFixed(1)}</td>`;});
+    r2+=`<td class="totale" style="font-size:10px">${totI!=null?(totI>=0?'+':'')+totI.toFixed(1):'—'}</td></tr>`;
+    let r3=`<tr style="font-size:10px;border-bottom:2px solid var(--rule)">`;
+    MN.forEach(m=>{
+      const e=me[m],i=mi[m];
+      if(e==null||i==null){r3+=`<td class="empty" style="font-size:10px">—</td>`;return;}
+      const dv=e-i; r3+=`<td style="font-size:10px;color:${dv>=0?'var(--green)':'var(--red)'};font-weight:600">${dv>=0?'+':''}${dv.toFixed(1)}</td>`;
+    });
+    const da=(tot!=null&&totI!=null)?tot-totI:null;
+    r3+=`<td class="totale" style="font-size:10px;color:${(da||0)>=0?'var(--green)':'var(--red)'};font-weight:600">${da!=null?(da>=0?'+':'')+da.toFixed(1):'—'}</td></tr>`;
+    ct.innerHTML+=r1+r2+r3;
+  });
+  ct.innerHTML+='</tbody>';
+  document.getElementById('cal-legend').innerHTML='* Riga 1: IWMO+ &nbsp;·&nbsp; Riga 2: <span style="opacity:.7">IWMO</span> &nbsp;·&nbsp; Riga 3: <strong>Delta</strong>';
+
+  // Rischio KPI
+  const rk=document.getElementById('risk-kpi');
+  [{k:'Sharpe 6M',v:sh6?sh6.toFixed(2):'n.d.',sub:'ultime 26 settimane'},
+   {k:'Sharpe 12M',v:sh12?sh12.toFixed(2):'n.d.',sub:'ultime 52 settimane'},
+   {k:'Max Drawdown',v:fmt(d.max_drawdown),sub:'picco→valle'},
+   {k:'Turnover',v:d.turnover_medio?d.turnover_medio.toFixed(0)+'%':'—',sub:'medio per rebalancing'},
+   {k:'Rebalancing',v:d.n_rebalancing||'—',sub:'totali eseguiti'},
+  ].forEach(k=>{rk.innerHTML+=`<div class="kpi"><div class="k">${k.k}</div><div class="v">${k.v}</div><div class="sub">${k.sub}</div></div>`;});
+  if(d.turnover_medio) document.getElementById('turnover-val').textContent=d.turnover_medio.toFixed(0)+'%';
+
+  // ── PORTAFOGLIO CORRENTE ──────────────────────────────────────────
+  const comp=d.composizione_corrente||[];
+  const versioni=d.versioni||[];
+  const compPrec=versioni.length>=2?versioni[versioni.length-2].composizione:[];
+  const inPtfSet=new Set(comp.map(p=>p.ticker));
+
+  const cb=document.getElementById('comp-tbody');
+  comp.forEach(p=>{
+    const isXeon=p.ticker==='XEON.MI';
+    const kdir=p.kama_dir;
+    const kdirStr=kdir>0?'↑':kdir<0?'↓':'→';
+    cb.innerHTML+=`<tr class="${isXeon?'xeon-row':''}">
+      <td style="font-family:monospace;font-weight:600">${p.ticker}</td>
+      <td style="font-size:11px">${(p.nome||'').replace('iShares','iSh').replace('WisdomTree','WT')}</td>
+      <td><span class="cat-badge ${p.cat||''}">${(p.cat||'').replace(/_/g,' ')}</span></td>
+      <td style="font-family:monospace;font-weight:600">${(p.peso||0).toFixed(1)}%</td>
+      <td style="font-family:monospace;color:var(--etp)">${p.score!=null?p.score.toFixed(0):'—'}</td>
+      <td style="font-family:monospace;color:${(p.mom6m||0)>=0?'var(--green)':'var(--red)'}">${p.mom6m!=null?fmt(p.mom6m):'—'}</td>
+      <td style="font-family:monospace;color:${(p.mom3m||0)>=0?'var(--green)':'var(--red)'}">${p.mom3m!=null?fmt(p.mom3m):'—'}</td>
+      <td style="font-family:monospace;color:${(p.mom1m||0)>=0?'var(--green)':'var(--red)'}">${p.mom1m!=null?fmt(p.mom1m):'—'}</td>
+      <td style="font-family:monospace;font-size:11px">${p.er!=null?p.er.toFixed(2):'—'}</td>
+      <td style="font-family:monospace;font-size:11px">${p.kama!=null?p.kama.toFixed(2)+' '+kdirStr:'—'}</td>
+      <td style="font-family:monospace;font-size:10px;color:var(--dim)">${p.data_ingresso||'—'}</td>
+      <td>
+        ${p.azione?`<span class="az-badge ${p.azione}">${p.azione}</span>`:''}
+        <div class="commento">${p.commento||''}</div>
+      </td>
+    </tr>`;
+  });
+
+  // ETF usciti
+  const ub=document.getElementById('usciti-tbody');
+  const usciti=(compPrec||[]).filter(p=>!inPtfSet.has(p.ticker));
+  if(!usciti.length){
+    ub.innerHTML=`<tr><td colspan="4" style="color:var(--dim);font-size:11px;padding:12px 10px">Nessuna variazione dall'ultimo rebalancing</td></tr>`;
+  }else{
+    usciti.forEach(p=>{
+      const mot=p.mom6m<0?`Momentum 6M negativo (${fmt(p.mom6m)}) — trend invertito`:
+                p.mom3m<0?`Momentum 3M negativo (${fmt(p.mom3m)}) — forza in calo`:
+                `Sostituito da ETF con score superiore`;
+      ub.innerHTML+=`<tr>
+        <td style="font-family:monospace;font-weight:600">${p.ticker}</td>
+        <td style="font-size:11px">${(p.nome||'').replace('iShares','iSh')}</td>
+        <td><span class="cat-badge ${p.cat||''}">${(p.cat||'').replace(/_/g,' ')}</span></td>
+        <td style="font-size:11px;color:var(--red)">${mot}</td>
+      </tr>`;
+    });
+  }
+
+  drawDonut(comp);
+
+  // Universo 52 ETF arricchito
+  const scoreMap={};
+  comp.forEach(p=>{scoreMap[p.ticker]=p;});
+  const dataIngMap=d.data_ingresso_map||{};
+  UNIVERSO_RICH=UNIVERSO.map((e,i)=>{
+    const ptf=scoreMap[e.t];
+    return {...e,inPtf:!!ptf,peso:ptf?.peso||null,score:ptf?.score||null,
+            mom6m:ptf?.mom6m||null,mom3m:ptf?.mom3m||null,mom1m:ptf?.mom1m||null,
+            er:ptf?.er||null,dataIng:dataIngMap[e.t]||null};
+  });
+  const ub2=document.getElementById('universo-tbody');
+  UNIVERSO_RICH.forEach((e,i)=>{
+    ub2.innerHTML+=`<tr class="${e.inPtf?'in-ptf':''}">
+      <td style="font-family:monospace;color:var(--dim);font-size:10px">${i+1}</td>
+      <td style="font-family:monospace;font-weight:600;font-size:12px">${e.inPtf?'<span class="in-ptf-dot"></span>':''}${e.t}</td>
+      <td style="font-size:11px">${e.n}</td>
+      <td><span class="cat-badge ${e.cat}">${e.cat.replace(/_/g,' ')}</span></td>
+      <td style="font-family:monospace;font-size:10px;color:var(--dim)">${e.sub}</td>
+      <td style="text-align:center">${e.inPtf?'✅':''}</td>
+      <td style="font-family:monospace">${e.peso!=null?e.peso.toFixed(1)+'%':'—'}</td>
+      <td style="font-family:monospace;color:var(--etp)">${e.score!=null?e.score.toFixed(0):'—'}</td>
+      <td style="font-family:monospace;color:${(e.mom6m||0)>=0?'var(--green)':'var(--red)'}">${e.mom6m!=null?fmt(e.mom6m):'—'}</td>
+      <td style="font-family:monospace;color:${(e.mom3m||0)>=0?'var(--green)':'var(--red)'}">${e.mom3m!=null?fmt(e.mom3m):'—'}</td>
+      <td style="font-family:monospace;color:${(e.mom1m||0)>=0?'var(--green)':'var(--red)'}">${e.mom1m!=null?fmt(e.mom1m):'—'}</td>
+      <td style="font-family:monospace;font-size:11px">${e.er!=null?e.er.toFixed(2):'—'}</td>
+      <td style="font-family:monospace;font-size:10px;color:var(--dim)">${e.dataIng||'—'}</td>
+    </tr>`;
+  });
+
+  // ── SEGNALI IWMO ──────────────────────────────────────────────────
+  document.getElementById('segnali-strip-main').innerHTML=segnaliHtml(seg, true);
+
+  const sh=document.getElementById('storia-segnali');
+  (d.storia_segnali||[]).forEach(s=>{
+    const n=s.n_segnali||0;
+    sh.innerHTML+=`<span class="sh-pill s${n}" title="${s.descrizione||''}">${s.data?s.data.slice(5):''} ${n}/3</span>`;
+  });
+
+  const vb=document.getElementById('ver-body');
+  (d.versioni||[]).slice().reverse().slice(0,25).forEach(v=>{
+    const sg2=v.segnali||{}, n=v.n_segnali||0, col=SC[Math.min(n,3)];
+    vb.innerHTML+=`<tr>
+      <td style="font-family:monospace;font-size:11px">${v.data}</td>
+      <td style="color:${col};font-weight:700;font-family:monospace">${n}/3</td>
+      <td style="font-family:monospace">${v.quota_az||100}%</td>
+      <td style="font-family:monospace">${fmtC(v.capitale)}</td>
+      <td style="font-family:monospace">${(v.composizione||[]).length}</td>
+      <td style="font-family:monospace;font-size:10px;color:${sg2.s1?'var(--red)':'var(--green)'}">${sg2.s1?'✓ attivo':'✗'}</td>
+      <td style="font-family:monospace;font-size:10px;color:${sg2.s2?'var(--red)':'var(--green)'}">${sg2.s2?'✓ attivo':'✗'}</td>
+      <td style="font-family:monospace;font-size:10px;color:${sg2.s3?'var(--red)':'var(--green)'}">${sg2.s3?'✓ attivo':'✗'}</td>
+    </tr>`;
+  });
+
+  // ── CONFRONTO ─────────────────────────────────────────────────────
+  const bb=document.getElementById('bm-box');
+  bb.innerHTML=`
+    <div class="corr-item">
+      <div class="cv">${d.benchmark_perf!=null?fmt(d.benchmark_perf):'—'}</div>
+      <div class="cl">IWMO.MI</div>
+      <div class="cs" style="background:${(d.outperformance||0)>=0?'#dcfce7':'#fee2e2'};color:${(d.outperformance||0)>=0?'var(--green)':'var(--red)'}">
+        IWMO+: ${d.outperformance!=null?fmt(d.outperformance):'—'}
+      </div>
+    </div>
+    <div class="corr-item">
+      <div class="cv">${d.benchmark2_perf!=null?fmt(d.benchmark2_perf):'—'}</div>
+      <div class="cl">VWCE.DE</div>
+      <div class="cs" style="background:${(d.outperformance2||0)>=0?'#dcfce7':'#fee2e2'};color:${(d.outperformance2||0)>=0?'var(--green)':'var(--red)'}">
+        IWMO+: ${d.outperformance2!=null?fmt(d.outperformance2):'—'}
+      </div>
+    </div>
+    <div class="corr-item">
+      <div class="cv" style="font-size:20px">${d.batte_benchmark?'✅':'❌'}</div>
+      <div class="cl">Batte IWMO</div>
+      <div class="cs" style="background:#f0f0f0;color:#666">da ${d.backtest_start}</div>
+    </div>`;
+
+  const bk=document.getElementById('bm-kpi');
+  [{k:'IWMO perf',v:d.benchmark_perf!=null?fmt(d.benchmark_perf):'—',sub:'da '+d.backtest_start},
+   {k:'IWMO+ vs IWMO',v:d.outperformance!=null?fmt(d.outperformance):'—',sub:'outperformance'},
+   {k:'VWCE perf',v:d.benchmark2_perf!=null?fmt(d.benchmark2_perf):'—',sub:'da '+d.backtest_start},
+   {k:'IWMO+ vs VWCE',v:d.outperformance2!=null?fmt(d.outperformance2):'—',sub:'outperformance'},
+  ].forEach(k=>{bk.innerHTML+=`<div class="kpi"><div class="k">${k.k}</div><div class="v">${k.v}</div><div class="sub">${k.sub}</div></div>`;});
+}
+
+// ── EXPORT EXCEL ──────────────────────────────────────────────────────────
+function esportaExcel(){
+  if(!DATA) return;
+  const wb=XLSX.utils.book_new();
+  const comp=DATA.composizione_corrente||[];
+  const versioni=DATA.versioni||[];
+  const compPrec=versioni.length>=2?versioni[versioni.length-2].composizione:[];
+  const dataIngMap=DATA.data_ingresso_map||{};
+
+  // Foglio 1: Portafoglio corrente
+  const r1=[['Ticker','Nome','Categoria','Sub','Peso %','Score','Mom 6M %','Mom 3M %','Mom 1M %','ER','KAMA','KAMA Dir','Data Ingresso','Azione','Commento']];
+  comp.forEach(p=>{
+    r1.push([p.ticker,p.nome||'',p.cat||'',p.sub||'',p.peso||'',
+             p.score!=null?p.score:'',p.mom6m!=null?p.mom6m:'',
+             p.mom3m!=null?p.mom3m:'',p.mom1m!=null?p.mom1m:'',
+             p.er!=null?p.er:'',p.kama!=null?p.kama:'',
+             p.kama_dir!=null?p.kama_dir:'',
+             p.data_ingresso||'',p.azione||'',p.commento||'']);
+  });
+  const ws1=XLSX.utils.aoa_to_sheet(r1);
+  ws1['!cols']=[12,32,12,12,7,7,8,8,8,7,10,7,12,10,50].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb,ws1,'Portafoglio corrente');
+
+  // Foglio 2: Universo 52 ETF
+  const r2=[['#','Ticker','Nome','Categoria','Sub','In portafoglio','Peso %','Score','Mom 6M %','Mom 3M %','Mom 1M %','ER','Data ingresso']];
+  UNIVERSO_RICH.forEach((e,i)=>{
+    r2.push([i+1,e.t,e.n,e.cat,e.sub,e.inPtf?'Sì':'No',
+             e.peso!=null?e.peso:'',e.score!=null?e.score:'',
+             e.mom6m!=null?e.mom6m:'',e.mom3m!=null?e.mom3m:'',e.mom1m!=null?e.mom1m:'',
+             e.er!=null?e.er:'',e.dataIng||'']);
+  });
+  const ws2=XLSX.utils.aoa_to_sheet(r2);
+  ws2['!cols']=[4,12,32,12,12,12,7,7,8,8,8,7,12].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb,ws2,'Universo 52 ETF');
+
+  // Foglio 3: Rendimenti mensili
+  const rpa=DATA.rend_per_anno||{}, ra=DATA.rend_annuo||{};
+  const riw=DATA.rend_iwmo_mese||{}, riwa=DATA.rend_iwmo_anno||{};
+  const MN=['01','02','03','04','05','06','07','08','09','10','11','12'];
+  const r3=[['Anno','Serie','Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic','Totale']];
+  Object.keys(rpa).sort().forEach(anno=>{
+    const e=rpa[anno]||{}, iw=riw[anno]||{};
+    r3.push([anno,'IWMO+',...MN.map(m=>e[m]!=null?e[m]:''),ra[anno]!=null?ra[anno]:'']);
+    r3.push(['','IWMO',...MN.map(m=>iw[m]!=null?iw[m]:''),riwa[anno]!=null?riwa[anno]:'']);
+    r3.push(['','Δ',...MN.map(m=>(e[m]!=null&&iw[m]!=null)?+(e[m]-iw[m]).toFixed(2):'')]);
+  });
+  const ws3=XLSX.utils.aoa_to_sheet(r3);
+  ws3['!cols']=[6,10,...Array(13).fill(7)].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb,ws3,'Rendimenti mensili');
+
+  // Foglio 4: Storia segnali IWMO
+  const r4=[['Data','N Segnali','Quota Az %','S1 Mom1M','S2 KAMA','S3 Max60gg','Descrizione']];
+  (DATA.storia_segnali||[]).forEach(s=>{
+    r4.push([s.data,s.n_segnali,[100,70,30,0][Math.min(s.n_segnali||0,3)],
+             s.s1?'✓':'✗',s.s2?'✓':'✗',s.s3?'✓':'✗',s.descrizione||'']);
+  });
+  const ws4=XLSX.utils.aoa_to_sheet(r4);
+  ws4['!cols']=[12,8,10,10,10,10,50].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb,ws4,'Segnali IWMO');
+
+  XLSX.writeFile(wb,'COMPASS_IWMO+_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+// ── CHARTS ────────────────────────────────────────────────────────────────
+function initC(id,h){
+  const c=document.getElementById(id);
+  const W=c.parentElement.clientWidth;
+  c.width=W; c.style.width=W+'px'; c.height=h;
+  return {c,ctx:c.getContext('2d'),W,H:h};
+}
+
+function drawEquity(){
+  if(!DATA) return;
+  const eq=DATA.equity_mensile||[]; if(!eq.length) return;
+  const {c,ctx,W,H}=initC('c-equity',260);
+  const PAD={l:65,r:20,t:12,b:28},cw=W-PAD.l-PAD.r,ch=H-PAD.t-PAD.b;
+  const vals=eq.map(e=>e.valore),labels=eq.map(e=>e.mese),base=100000;
+  const minV=Math.min(...vals,base)*0.995,maxV=Math.max(...vals)*1.005;
+  const sx=i=>PAD.l+i/(vals.length-1)*cw,sy=v=>PAD.t+(1-(v-minV)/(maxV-minV))*ch;
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  for(let i=0;i<=4;i++){const y=PAD.t+ch*i/4;ctx.strokeStyle='#f0f0f0';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(W-PAD.r,y);ctx.stroke();ctx.fillStyle='#999';ctx.font='9px monospace';ctx.fillText(Math.round((maxV-(maxV-minV)*i/4)/1000)+'k€',2,y+4);}
+  ctx.strokeStyle='#e5e5e5';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(PAD.l,sy(base));ctx.lineTo(W-PAD.r,sy(base));ctx.stroke();ctx.setLineDash([]);
+  ctx.beginPath();ctx.moveTo(sx(0),sy(vals[0]));vals.forEach((v,i)=>ctx.lineTo(sx(i),sy(v)));ctx.lineTo(sx(vals.length-1),H-PAD.b);ctx.lineTo(PAD.l,H-PAD.b);ctx.closePath();
+  const g=ctx.createLinearGradient(0,PAD.t,0,H-PAD.b);g.addColorStop(0,'rgba(124,58,237,0.2)');g.addColorStop(1,'rgba(124,58,237,0)');ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle='#7c3aed';ctx.lineWidth=2;ctx.beginPath();vals.forEach((v,i)=>i===0?ctx.moveTo(sx(i),sy(v)):ctx.lineTo(sx(i),sy(v)));ctx.stroke();
+  ctx.fillStyle='#999';ctx.font='9px monospace';labels.forEach((l,i)=>{if(i%2===0||i===labels.length-1)ctx.fillText(l.slice(2),sx(i)-12,H-PAD.b+14);});
+  ctx.fillStyle='#7c3aed';ctx.font='bold 11px monospace';ctx.fillText(fmtC(vals[vals.length-1]),sx(vals.length-1)+4,sy(vals[vals.length-1])+4);
+}
+
+function drawDD(){
+  if(!DATA) return;
+  const dds=DATA.drawdown_series||[];if(!dds.length) return;
+  const {c,ctx,W,H}=initC('c-dd',200);
+  const PAD={l:55,r:12,t:12,b:28},cw=W-PAD.l-PAD.r,ch=H-PAD.t-PAD.b;
+  const vals=dds.map(d=>d.dd),labels=dds.map(d=>d.data);
+  const minV=Math.min(...vals)*1.05,maxV=0.5;
+  const sx=i=>PAD.l+i/(vals.length-1)*cw,sy=v=>PAD.t+(1-(v-minV)/(maxV-minV))*ch;
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  for(let i=0;i<=4;i++){const v=minV+(maxV-minV)*i/4,y=PAD.t+ch*(1-i/4);ctx.strokeStyle='#f0f0f0';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(W-PAD.r,y);ctx.stroke();ctx.fillStyle='#999';ctx.font='9px monospace';ctx.fillText(v.toFixed(1)+'%',2,y+4);}
+  ctx.strokeStyle='#e5e5e5';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(PAD.l,sy(0));ctx.lineTo(W-PAD.r,sy(0));ctx.stroke();ctx.setLineDash([]);
+  ctx.beginPath();ctx.moveTo(sx(0),sy(0));vals.forEach((v,i)=>ctx.lineTo(sx(i),sy(v)));ctx.lineTo(sx(vals.length-1),sy(0));ctx.closePath();
+  const g=ctx.createLinearGradient(0,sy(minV),0,sy(0));g.addColorStop(0,'rgba(220,38,38,0.3)');g.addColorStop(1,'rgba(220,38,38,0.05)');ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle='#dc2626';ctx.lineWidth=1.5;ctx.beginPath();vals.forEach((v,i)=>i===0?ctx.moveTo(sx(i),sy(v)):ctx.lineTo(sx(i),sy(v)));ctx.stroke();
+  const step=Math.max(1,Math.floor(vals.length/8));
+  ctx.fillStyle='#999';ctx.font='9px monospace';labels.forEach((l,i)=>{if(l&&i%step===0)ctx.fillText(l.slice(5),sx(i)-12,H-PAD.b+14);});
+  const mi=vals.indexOf(Math.min(...vals));
+  ctx.fillStyle='#dc2626';ctx.font='bold 10px monospace';ctx.fillText(vals[mi].toFixed(1)+'%',sx(mi)+4,sy(vals[mi])-4);
+}
+
+function drawRollingS(){
+  if(!DATA) return;
+  const rs=DATA.rolling_sharpe||[];if(!rs.length) return;
+  const {c,ctx,W,H}=initC('c-sharpe',180);
+  const PAD={l:45,r:12,t:12,b:28},cw=W-PAD.l-PAD.r,ch=H-PAD.t-PAD.b;
+  const vals=rs.map(r=>r.sharpe),labels=rs.map(r=>r.data||'');
+  const minV=Math.min(...vals)-0.3,maxV=Math.max(...vals)+0.3;
+  const sx=i=>PAD.l+i/(vals.length-1)*cw,sy=v=>PAD.t+(1-(v-minV)/(maxV-minV))*ch;
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  for(let i=0;i<=4;i++){const v=minV+(maxV-minV)*i/4,y=PAD.t+ch*(1-i/4);ctx.strokeStyle='#f0f0f0';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.l,y);ctx.lineTo(W-PAD.r,y);ctx.stroke();ctx.fillStyle='#999';ctx.font='9px monospace';ctx.fillText(v.toFixed(1),2,y+4);}
+  if(minV<0){const y0=sy(0);ctx.strokeStyle='#e5e5e5';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(PAD.l,y0);ctx.lineTo(W-PAD.r,y0);ctx.stroke();ctx.setLineDash([]);}
+  vals.forEach((v,i)=>{
+    if(i===0) return;
+    const x0=sx(i-1),x1=sx(i),yp=sy(vals[i-1]),yv=sy(v),z=sy(Math.max(minV,0));
+    ctx.fillStyle=v>=0?'rgba(22,163,74,0.15)':'rgba(220,38,38,0.15)';
+    ctx.beginPath();ctx.moveTo(x0,yp);ctx.lineTo(x1,yv);ctx.lineTo(x1,z);ctx.lineTo(x0,z);ctx.closePath();ctx.fill();
+  });
+  ctx.lineWidth=2;ctx.beginPath();
+  vals.forEach((v,i)=>{ctx.strokeStyle=v>=0?'#16a34a':'#dc2626';if(i===0){ctx.moveTo(sx(i),sy(v));return;}ctx.lineTo(sx(i),sy(v));});ctx.stroke();
+  const step=Math.max(1,Math.floor(vals.length/8));
+  ctx.fillStyle='#999';ctx.font='9px monospace';labels.forEach((l,i)=>{if(l&&i%step===0)ctx.fillText(l.slice(5),sx(i)-12,H-PAD.b+14);});
+  ctx.fillStyle=vals[vals.length-1]>=0?'#16a34a':'#dc2626';ctx.font='bold 10px monospace';ctx.fillText(vals[vals.length-1].toFixed(2),sx(vals.length-1)+4,sy(vals[vals.length-1])-4);
+}
+
+function drawDonut(comp){
+  const {c,ctx,W,H}=initC('c-donut',260);
+  const cat={};comp.forEach(p=>{cat[p.cat]=(cat[p.cat]||0)+(p.peso||0);});
+  const R=Math.max(10,Math.min(W,H)/2-30),r=R*0.5,cx=W/2,cy=H/2-15;
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  let a=-Math.PI/2;
+  const entries=Object.entries(cat).sort((a,b)=>b[1]-a[1]);
+  const tot=entries.reduce((s,[,v])=>s+v,0);
+  entries.forEach(([ct,pct])=>{
+    const ang=(pct/tot)*2*Math.PI;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,R,a,a+ang);ctx.closePath();
+    ctx.fillStyle=CC[ct]||'#ccc';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+    if(pct>5){const ma=a+ang/2,lx=cx+(R*0.72)*Math.cos(ma),ly=cy+(R*0.72)*Math.sin(ma);ctx.fillStyle='#fff';ctx.font='bold 10px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(pct.toFixed(0)+'%',lx,ly);}
+    a+=ang;
+  });
+  ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();
+  ctx.fillStyle='#111';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(comp.length+' ETF',cx,cy);
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  let lx=4,ly=H-8;
+  entries.forEach(([ct])=>{
+    ctx.fillStyle=CC[ct]||'#ccc';ctx.fillRect(lx,ly-8,8,8);
+    ctx.fillStyle='#555';ctx.font='9px monospace';
+    const lb=ct.replace(/_/g,' ');ctx.fillText(lb,lx+10,ly);
+    lx+=ctx.measureText(lb).width+22;if(lx>W-80){lx=4;ly-=13;}
+  });
+}
+
+window.addEventListener('resize',()=>{
+  if(document.getElementById('tab-overview').classList.contains('active')) drawEquity();
+  if(document.getElementById('tab-rischio').classList.contains('active')){drawDD();drawRollingS();}
+});
+
+load();
+</script>
+</body>
+</html>
